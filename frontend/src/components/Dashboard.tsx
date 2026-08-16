@@ -1,7 +1,13 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApi } from '../context/ApiContext';
-import { Badge } from './ui/Badge';
-import { Button } from './ui/Button';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Card, CardContent } from './ui/card';
+import { Input } from './ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './ui/dropdown-menu';
 import {
   Plus,
   Search,
@@ -20,9 +26,9 @@ import {
 } from 'lucide-react';
 
 export const Dashboard: React.FC = () => {
+  const navigate = useNavigate();
   const {
     apis,
-    setCurrentRoute,
     deleteApi,
     setSelectedApiId,
     searchQuery,
@@ -37,8 +43,6 @@ export const Dashboard: React.FC = () => {
     refreshApis,
     updateApi
   } = useApi();
-
-  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
   // Compute metrics
   const totalApis = apis.length;
@@ -104,7 +108,7 @@ export const Dashboard: React.FC = () => {
           </p>
         </div>
         <Button
-          onClick={() => setCurrentRoute('register')}
+          onClick={() => navigate('/monitoring/apis')}
           className="flex items-center gap-1.5 cursor-pointer shadow-xs text-xs font-semibold"
         >
           <Plus size={14} />
@@ -115,71 +119,79 @@ export const Dashboard: React.FC = () => {
       {/* Summary Metrics Section (shadcn style) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total APIs */}
-        <div className="p-4 rounded-lg border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 flex items-center justify-between card-shadow text-left">
-          <div className="space-y-1">
-            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">
-              Total APIs
-            </span>
-            <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50 block">
-              {totalApis}
-            </span>
-          </div>
-          <Database size={15} className="text-slate-400 dark:text-slate-500" />
-        </div>
+        <Card>
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">
+                Total APIs
+              </span>
+              <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50 block">
+                {totalApis}
+              </span>
+            </div>
+            <Database size={15} className="text-slate-400 dark:text-slate-500" />
+          </CardContent>
+        </Card>
 
         {/* Production APIs */}
-        <div className="p-4 rounded-lg border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 flex items-center justify-between card-shadow text-left">
-          <div className="space-y-1">
-            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">
-              Production
-            </span>
-            <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50 block">
-              {prodApis}
-            </span>
-          </div>
-          <Layers size={15} className="text-slate-400 dark:text-slate-500" />
-        </div>
+        <Card>
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">
+                Production
+              </span>
+              <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50 block">
+                {prodApis}
+              </span>
+            </div>
+            <Layers size={15} className="text-slate-400 dark:text-slate-500" />
+          </CardContent>
+        </Card>
 
         {/* Staging APIs */}
-        <div className="p-4 rounded-lg border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 flex items-center justify-between card-shadow text-left">
-          <div className="space-y-1">
-            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">
-              Staging
-            </span>
-            <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50 block">
-              {stagingApis}
-            </span>
-          </div>
-          <GitBranch size={15} className="text-slate-400 dark:text-slate-500" />
-        </div>
+        <Card>
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">
+                Staging
+              </span>
+              <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50 block">
+                {stagingApis}
+              </span>
+            </div>
+            <GitBranch size={15} className="text-slate-400 dark:text-slate-500" />
+          </CardContent>
+        </Card>
 
         {/* Development APIs */}
-        <div className="p-4 rounded-lg border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 flex items-center justify-between card-shadow text-left">
-          <div className="space-y-1">
-            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">
-              Development
-            </span>
-            <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50 block">
-              {devApis}
-            </span>
-          </div>
-          <Activity size={15} className="text-slate-400 dark:text-slate-500" />
-        </div>
+        <Card>
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">
+                Development
+              </span>
+              <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50 block">
+                {devApis}
+              </span>
+            </div>
+            <Activity size={15} className="text-slate-400 dark:text-slate-500" />
+          </CardContent>
+        </Card>
       </div>
 
       {/* Table Controls (Filters, Sorting, Search, Refresh) */}
       <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between p-3 rounded-lg border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 card-shadow">
         {/* Search */}
         <div className="relative flex-1 max-w-sm">
-          <span className="absolute inset-y-0 left-3 flex items-center text-slate-400 dark:text-slate-550 pointer-events-none">
+          <span className="absolute inset-y-0 left-3 flex items-center text-slate-400 dark:text-slate-550 pointer-events-none z-10">
             <Search size={13} />
           </span>
-          <input
+          <Input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search API name or base URL..."
-            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md border bg-transparent border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-550 focus:outline-none focus:ring-1 focus:ring-slate-950 dark:focus:ring-slate-300 focus:border-slate-400 dark:focus:border-slate-700 transition-all"
+            className="pl-8 w-full bg-transparent border-slate-200 dark:border-slate-800 h-8"
           />
         </div>
 
@@ -188,52 +200,57 @@ export const Dashboard: React.FC = () => {
           {/* Environment Filter */}
           <div className="flex items-center gap-1.5">
             <Filter size={12} className="text-slate-400" />
-            <select
-              value={envFilter}
-              onChange={(e) => setEnvFilter(e.target.value)}
-              className="px-2.5 py-1 text-xs rounded-md border bg-transparent border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-slate-950 dark:focus:ring-slate-350 cursor-pointer"
-            >
-              <option value="all">All Environments</option>
-              <option value="Production">Production</option>
-              <option value="Staging">Staging</option>
-              <option value="Development">Development</option>
-            </select>
+            <Select value={envFilter} onValueChange={(val) => val && setEnvFilter(val)}>
+              <SelectTrigger className="w-[140px] h-8 text-xs bg-transparent border-slate-200 dark:border-slate-800">
+                <SelectValue placeholder="All Environments" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Environments</SelectItem>
+                <SelectItem value="Production">Production</SelectItem>
+                <SelectItem value="Staging">Staging</SelectItem>
+                <SelectItem value="Development">Development</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Status Filter */}
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-2.5 py-1 text-xs rounded-md border bg-transparent border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-slate-950 dark:focus:ring-slate-350 cursor-pointer"
-          >
-            <option value="all">All Statuses</option>
-            <option value="Active">Active</option>
-            <option value="Inactive">Inactive</option>
-          </select>
+          <Select value={statusFilter} onValueChange={(val) => val && setStatusFilter(val)}>
+            <SelectTrigger className="w-[120px] h-8 text-xs bg-transparent border-slate-200 dark:border-slate-800">
+              <SelectValue placeholder="All Statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="Active">Active</SelectItem>
+              <SelectItem value="Inactive">Inactive</SelectItem>
+            </SelectContent>
+          </Select>
 
           {/* Sorting */}
           <div className="flex items-center gap-1.5">
             <ArrowUpDown size={12} className="text-slate-400" />
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="px-2.5 py-1 text-xs rounded-md border bg-transparent border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-slate-950 dark:focus:ring-slate-350 cursor-pointer"
-            >
-              <option value="createdAt">Sort by Date</option>
-              <option value="name">Sort by Name</option>
-              <option value="version">Sort by Version</option>
-            </select>
+            <Select value={sortBy} onValueChange={(val) => setSortBy(val as any)}>
+              <SelectTrigger className="w-[130px] h-8 text-xs bg-transparent border-slate-200 dark:border-slate-800">
+                <SelectValue placeholder="Sort by Date" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="createdAt">Sort by Date</SelectItem>
+                <SelectItem value="name">Sort by Name</SelectItem>
+                <SelectItem value="version">Sort by Version</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Refresh Action */}
-          <button
+          <Button
+            variant="outline"
+            size="icon"
             onClick={refreshApis}
             disabled={isRefreshing}
-            className="h-8 w-8 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-150 border border-slate-200 dark:border-slate-800 disabled:opacity-50 transition-colors cursor-pointer flex items-center justify-center"
+            className="h-8 w-8"
             title="Refresh Health States"
           >
             <RotateCw size={13} className={`${isRefreshing ? 'animate-spin' : ''}`} />
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -267,27 +284,27 @@ export const Dashboard: React.FC = () => {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 text-slate-450 dark:text-slate-450 text-[10px] font-bold uppercase tracking-widest">
-                  <th className="px-5 py-3">API Name</th>
-                  <th className="px-5 py-3">Base URL</th>
-                  <th className="px-5 py-3">Environment</th>
-                  <th className="px-5 py-3">Status</th>
-                  <th className="px-5 py-3">Version</th>
-                  <th className="px-5 py-3 hidden md:table-cell">Registered</th>
-                  <th className="px-5 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-850/50">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-50/50 dark:bg-slate-950/20 text-slate-450 dark:text-slate-450 text-[10px] font-bold uppercase tracking-widest hover:bg-slate-50/50 dark:hover:bg-slate-950/20">
+                  <TableHead className="px-5 py-3 h-auto">API Name</TableHead>
+                  <TableHead className="px-5 py-3 h-auto">Base URL</TableHead>
+                  <TableHead className="px-5 py-3 h-auto">Environment</TableHead>
+                  <TableHead className="px-5 py-3 h-auto">Status</TableHead>
+                  <TableHead className="px-5 py-3 h-auto">Version</TableHead>
+                  <TableHead className="px-5 py-3 h-auto hidden md:table-cell">Registered</TableHead>
+                  <TableHead className="px-5 py-3 h-auto text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="divide-y divide-slate-100 dark:divide-slate-850/50">
                 {filteredApis.map((api) => (
-                  <tr
+                  <TableRow
                     key={api.id}
                     onClick={(e) => handleRowClick(api.id, e)}
-                    className="hover:bg-slate-50/50 dark:hover:bg-slate-900/10 cursor-pointer transition-cozy text-xs group"
+                    className="hover:bg-slate-50/50 dark:hover:bg-slate-900/10 cursor-pointer transition-cozy text-xs group border-b-0"
                   >
                     {/* API Name */}
-                    <td className="px-5 py-3">
+                    <TableCell className="px-5 py-3">
                       <div className="flex flex-col text-left">
                         <span className="font-semibold text-slate-900 dark:text-slate-100 group-hover:underline transition-all">
                           {api.name}
@@ -296,10 +313,10 @@ export const Dashboard: React.FC = () => {
                           {api.description || 'No description provided.'}
                         </span>
                       </div>
-                    </td>
+                    </TableCell>
 
                     {/* Base URL */}
-                    <td className="px-5 py-3 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                    <TableCell className="px-5 py-3 font-mono text-[11px] text-slate-500 dark:text-slate-400">
                       <div className="flex items-center gap-1.5">
                         <span className="truncate max-w-[200px]">{api.baseUrl}</span>
                         <a
@@ -313,107 +330,64 @@ export const Dashboard: React.FC = () => {
                           <ExternalLink size={10} />
                         </a>
                       </div>
-                    </td>
+                    </TableCell>
 
                     {/* Environment */}
-                    <td className="px-5 py-3">
+                    <TableCell className="px-5 py-3">
                       <Badge variant={api.environment.toLowerCase() as any}>
                         {api.environment}
                       </Badge>
-                    </td>
+                    </TableCell>
 
                     {/* Status */}
-                    <td className="px-5 py-3">
+                    <TableCell className="px-5 py-3">
                       <div className="flex items-center gap-1.5">
                         <span className={`h-1.5 w-1.5 rounded-full ${api.status === 'Active' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
                         <span className="font-semibold text-[11px] text-slate-700 dark:text-slate-350">
                           {api.status}
                         </span>
                       </div>
-                    </td>
+                    </TableCell>
 
                     {/* Version */}
-                    <td className="px-5 py-3">
+                    <TableCell className="px-5 py-3">
                       <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 border border-slate-150 dark:border-slate-800">
                         {api.version}
                       </span>
-                    </td>
+                    </TableCell>
 
                     {/* Registered Date */}
-                    <td className="px-5 py-3 text-[10px] text-slate-450 dark:text-slate-500 hidden md:table-cell font-medium">
+                    <TableCell className="px-5 py-3 text-[10px] text-slate-450 dark:text-slate-500 hidden md:table-cell font-medium">
                       {formatDate(api.createdAt)}
-                    </td>
+                    </TableCell>
 
                     {/* Action trigger dropdown */}
-                    <td className="px-5 py-3 text-right relative">
-                      <div className="inline-block text-left">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveMenuId(prev => (prev === api.id ? null : api.id));
-                          }}
-                          className="action-menu-trigger h-7 w-7 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-900 dark:text-slate-500 dark:hover:text-slate-200 transition-colors flex items-center justify-center cursor-pointer border border-transparent hover:border-slate-200 dark:hover:border-slate-850"
+                    <TableCell className="px-5 py-3 text-right relative">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent hover:bg-slate-100 dark:hover:bg-slate-800 hover:border-slate-200 dark:hover:border-slate-850 text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-colors cursor-pointer"
                         >
                           <MoreVertical size={13} />
-                        </button>
-
-                        {activeMenuId === api.id && (
-                          <>
-                            <div
-                              className="fixed inset-0 z-10"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setActiveMenuId(null);
-                              }}
-                            />
-                            <div className="action-menu-dropdown absolute right-0 mt-1 w-40 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-md py-1 z-20 text-left">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedApiId(api.id);
-                                  setActiveMenuId(null);
-                                }}
-                                className="w-full px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 cursor-pointer border-0"
-                              >
-                                <Eye size={12} className="text-slate-400" />
-                                <span>View Details</span>
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  updateApi(api.id, {
-                                    status: api.status === 'Active' ? 'Inactive' : 'Active'
-                                  });
-                                  setActiveMenuId(null);
-                                }}
-                                className="w-full px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 cursor-pointer border-0"
-                              >
-                                <RotateCw size={12} className="text-slate-400" />
-                                <span>Toggle Status</span>
-                              </button>
-                              <div className="h-px bg-slate-100 dark:bg-slate-850 my-1" />
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (confirm(`Are you sure you want to delete ${api.name}?`)) {
-                                    deleteApi(api.id);
-                                  }
-                                  setActiveMenuId(null);
-                                }}
-                                className="w-full px-3 py-1.5 text-xs font-semibold text-red-650 hover:bg-red-50 dark:hover:bg-red-950/20 flex items-center gap-2 cursor-pointer border-0"
-                              >
-                                <Trash2 size={12} />
-                                <span>Delete API</span>
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40 text-xs text-left" onClick={(e) => e.stopPropagation()}>
+                          <DropdownMenuItem onClick={() => setSelectedApiId(api.id)} className="cursor-pointer font-semibold">
+                            <Eye size={12} className="mr-2 text-slate-400" /> View Details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => updateApi(api.id, { status: api.status === 'Active' ? 'Inactive' : 'Active' })} className="cursor-pointer font-semibold">
+                            <RotateCw size={12} className="mr-2 text-slate-400" /> Toggle Status
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => { if (confirm(`Are you sure you want to delete ${api.name}?`)) deleteApi(api.id); }} className="cursor-pointer font-semibold text-red-600 focus:text-red-600 focus:bg-red-50 dark:focus:bg-red-950/20">
+                            <Trash2 size={12} className="mr-2" /> Delete API
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
       </div>

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useApi } from '../context/ApiContext';
-import { Badge } from './ui/Badge';
-import { Button } from './ui/Button';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
 import { 
   X, 
   Trash2, 

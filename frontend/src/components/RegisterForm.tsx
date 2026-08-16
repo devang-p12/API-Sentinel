@@ -1,470 +1,371 @@
-import React, { useState } from 'react';
-import { useApi } from '../context/ApiContext';
-import type { APIGroup, APIEnvironment, APIAuthType } from '../types/api';
-import { Input } from './ui/Input';
-import { Button } from './ui/Button';
-import {
-  Info,
-  Settings,
-  Activity,
-  Lock,
-  Tag,
-  X,
-  ArrowLeft
-} from 'lucide-react';
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useApi } from "@/context/ApiContext";
+import type { APIGroup, APIEnvironment, APIAuthType } from "@/types/api";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
+import { Check, CheckCircle2, Copy, KeyRound, Plus, RefreshCw, ShieldCheck } from "lucide-react";
 
-export const RegisterForm: React.FC = () => {
-  const { addApi, setCurrentRoute } = useApi();
+type AuthMethod = "None" | "API Key" | "Bearer Token" | "OAuth 2.0";
 
-  // Section 1: API Information
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [version, setVersion] = useState('v1.0');
-  const [group, setGroup] = useState<APIGroup>('Payments');
+const ENV_MAP: Record<string, APIEnvironment> = {
+  development: "Development",
+  staging: "Staging",
+  production: "Production",
+};
 
-  // Section 2: API Configuration
-  const [baseUrl, setBaseUrl] = useState('');
-  const [environment, setEnvironment] = useState<APIEnvironment>('Production');
-  const [documentationUrl, setDocumentationUrl] = useState('');
+const AUTH_MAP: Record<string, APIAuthType> = {
+  "api-key": "API Key",
+  bearer: "Bearer Token",
+  oauth2: "OAuth 2.0",
+  none: "None",
+};
 
-  // Section 3: Health Check
-  const [healthEndpoint, setHealthEndpoint] = useState('/health');
-  const [healthMethod, setHealthMethod] = useState<'GET' | 'POST'>('GET');
-  const [healthEnabled, setHealthEnabled] = useState(true);
+export default function RegisterForm() {
+  const navigate = useNavigate();
+  const { addApi } = useApi();
 
-  // Section 4: Authentication
-  const [authType, setAuthType] = useState<APIAuthType>('None');
-  const [apiKeyName, setApiKeyName] = useState('');
-  const [apiHeaderName, setApiHeaderName] = useState('Authorization');
-  const [tokenValue, setTokenValue] = useState('');
-  const [clientId, setClientId] = useState('');
-  const [clientSecret, setClientSecret] = useState('');
-  const [tokenUrl, setTokenUrl] = useState('');
+  const [formData, setFormData] = useState({
+    name: "",
+    description: "",
+    baseUrl: "",
+    version: "v1",
+    environment: "production",
+    group: "Other" as APIGroup,
+    authentication: "api-key",
+  });
 
-  // Section 5: Tags
-  const [tagInput, setTagInput] = useState('');
-  const [tags, setTags] = useState<string[]>([]);
+  const [scopes, setScopes] = useState({ read: true, write: false, delete: false });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitted, setSubmitted] = useState(false);
 
-  // Validation state
-  const [errors, setErrors] = useState<{ [key: string]: string }>({});
-
-  const handleAddTag = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if ((e.key === 'Enter' || e.key === ',') && tagInput.trim()) {
-      e.preventDefault();
-      const newTag = tagInput.trim().toLowerCase();
-      if (!tags.includes(newTag)) {
-        setTags(prev => [...prev, newTag]);
-      }
-      setTagInput('');
-    }
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+    if (errors[name]) setErrors(prev => ({ ...prev, [name]: "" }));
   };
 
-  const handleRemoveTag = (tagToRemove: string) => {
-    setTags(prev => prev.filter(t => t !== tagToRemove));
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newErrors: { [key: string]: string } = {};
-
-    if (!name.trim()) newErrors.name = 'API Name is required';
-    if (!version.trim()) newErrors.version = 'API Version is required';
-    if (!baseUrl.trim()) {
-      newErrors.baseUrl = 'Base URL is required';
+  const validate = () => {
+    const errs: Record<string, string> = {};
+    if (!formData.name.trim()) errs.name = "API name is required";
+    if (!formData.baseUrl.trim()) {
+      errs.baseUrl = "Base URL is required";
     } else {
-      try {
-        new URL(baseUrl);
-      } catch {
-        newErrors.baseUrl = 'Must be a valid URL starting with http:// or https://';
-      }
+      try { new URL(formData.baseUrl); } catch { errs.baseUrl = "Must be a valid URL (https://...)"; }
     }
+    return errs;
+  };
 
-    if (healthEnabled && !healthEndpoint.trim()) {
-      newErrors.healthEndpoint = 'Health endpoint path is required';
-    }
-
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
-      const firstErrorKey = Object.keys(newErrors)[0];
-      const errorEl = document.getElementById(`input-${firstErrorKey}`);
-      if (errorEl) {
-        errorEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-      return;
-    }
-
-    const authConfig: any = {};
-    if (authType === 'API Key') {
-      authConfig.apiKeyName = apiKeyName;
-      authConfig.apiHeaderName = apiHeaderName;
-    } else if (authType === 'Bearer Token') {
-      authConfig.tokenValue = tokenValue;
-    } else if (authType === 'OAuth 2.0') {
-      authConfig.clientId = clientId;
-      authConfig.clientSecret = clientSecret;
-      authConfig.tokenUrl = tokenUrl;
-    }
+  const handleSubmit = () => {
+    const errs = validate();
+    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
 
     addApi({
-      name,
-      description,
-      version,
-      group,
-      baseUrl,
-      environment,
-      documentationUrl: documentationUrl || undefined,
-      healthEndpoint,
-      healthMethod,
-      healthEnabled,
-      authType,
-      authConfig: authType !== 'None' ? authConfig : undefined,
-      tags
+      name: formData.name.trim(),
+      description: formData.description.trim(),
+      version: formData.version,
+      group: formData.group,
+      baseUrl: formData.baseUrl.trim(),
+      environment: ENV_MAP[formData.environment] ?? "Production",
+      authType: AUTH_MAP[formData.authentication] ?? "None",
+      healthEndpoint: "/health",
+      healthMethod: "GET",
+      healthEnabled: true,
+      tags: [],
     });
+
+    setSubmitted(true);
   };
 
-  return (
-    <div className="p-6 md:p-8 flex-1 overflow-y-auto bg-slate-50/20 dark:bg-slate-950/20 text-slate-800 dark:text-slate-100">
+  const resetForm = () => {
+    setFormData({ name: "", description: "", baseUrl: "", version: "v1", environment: "production", group: "Other", authentication: "api-key" });
+    setScopes({ read: true, write: false, delete: false });
+    setErrors({});
+    setSubmitted(false);
+  };
 
-      {/* Back link */}
-      <button
-        onClick={() => setCurrentRoute('dashboard')}
-        className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 hover:text-slate-655 dark:hover:text-slate-200 transition-colors uppercase tracking-widest mb-4 cursor-pointer"
-      >
-        <ArrowLeft size={12} />
-        <span>Back to APIs</span>
-      </button>
-
-      {/* Page Header */}
-      <div className="mb-6 text-left">
-        <h1 className="text-xl md:text-2xl font-extrabold tracking-tight m-0 text-slate-900 dark:text-slate-50">
-          Register API
-        </h1>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Add a new backend endpoint to the platform directory database.
-        </p>
+  if (submitted) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center p-8">
+        <Card className="w-full max-w-md text-center">
+          <CardContent className="flex flex-col items-center gap-5 p-10">
+            <div className="rounded-full bg-emerald-500/10 p-4">
+              <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+            </div>
+            <div className="space-y-1">
+              <h2 className="text-lg font-semibold tracking-tight">API Registered</h2>
+              <p className="text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">{formData.name}</span> has been added to your API registry.
+              </p>
+            </div>
+            <div className="flex gap-2 w-full">
+              <Button variant="outline" className="flex-1" onClick={resetForm}>Register Another</Button>
+              <Button className="flex-1" onClick={() => navigate("/monitoring/dashboard")}>View Dashboard</Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
+    );
+  }
 
-      <form onSubmit={handleSubmit} className="max-w-3xl space-y-5 text-left">
+  const authLabel = formData.authentication === "api-key" ? "API Key"
+    : formData.authentication === "oauth2" ? "OAuth 2.0" : "Bearer Token";
 
-        {/* Section 1: API Information */}
-        <div className="p-5 rounded-lg border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 card-shadow space-y-4">
-          <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-850 pb-2">
-            <Info size={14} className="text-slate-550 dark:text-slate-400" />
-            <h3 className="font-bold text-xs uppercase tracking-wider text-slate-800 dark:text-slate-200">
-              1. API Information
-            </h3>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="md:col-span-2">
-              <Input
-                id="input-name"
-                label="API Name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Payment API"
-                error={errors.name}
-              />
+  return (
+    <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
+      {/* Left: Form */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-foreground text-background">
+              <KeyRound className="h-5 w-5" />
             </div>
             <div>
-              <Input
-                id="input-version"
-                label="API Version"
-                value={version}
-                onChange={(e) => setVersion(e.target.value)}
-                placeholder="v1.0"
-                error={errors.version}
-              />
+              <CardTitle>API Configuration</CardTitle>
+              <CardDescription>Enter the details of your API endpoint.</CardDescription>
             </div>
           </div>
+        </CardHeader>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="md:col-span-2 flex flex-col gap-1.5 text-left">
-              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                Description
-              </label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="API endpoint details, response targets, and description details."
-                rows={3}
-                className="w-full px-3 py-1.5 text-xs rounded-md border bg-transparent text-slate-900 dark:text-slate-50 border-slate-200 dark:border-slate-800 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-slate-950 dark:focus:ring-slate-300 focus:border-slate-400 dark:focus:border-slate-700 transition-all"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5 text-left">
-              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                API Group
-              </label>
-              <select
-                value={group}
-                onChange={(e) => setGroup(e.target.value as APIGroup)}
-                className="w-full px-3 py-1.5 text-xs rounded-md border bg-transparent text-slate-900 dark:text-slate-50 border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-950 dark:focus:ring-slate-350 focus:border-slate-400 dark:focus:border-slate-700 transition-all cursor-pointer"
-              >
-                <option value="Payments">Payments</option>
-                <option value="Authentication">Authentication</option>
-                <option value="Users">Users</option>
-                <option value="Orders">Orders</option>
-                <option value="Notifications">Notifications</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* Section 2: API Configuration */}
-        <div className="p-5 rounded-lg border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 card-shadow space-y-4">
-          <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-850 pb-2">
-            <Settings size={14} className="text-slate-550 dark:text-slate-400" />
-            <h3 className="font-bold text-xs uppercase tracking-wider text-slate-800 dark:text-slate-200">
-              2. API Configuration
-            </h3>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="md:col-span-2">
-              <Input
-                id="input-baseUrl"
-                label="Base URL"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="https://api.company.com"
-                error={errors.baseUrl}
-                helperText="Fully qualified domain URL where the target service resides."
-              />
-            </div>
-            <div className="flex flex-col gap-1.5 text-left">
-              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                Environment
-              </label>
-              <select
-                value={environment}
-                onChange={(e) => setEnvironment(e.target.value as APIEnvironment)}
-                className="w-full px-3 py-1.5 text-xs rounded-md border bg-transparent text-slate-900 dark:text-slate-50 border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-950 dark:focus:ring-slate-355 focus:border-slate-400 dark:focus:border-slate-700 transition-all cursor-pointer"
-              >
-                <option value="Production">Production</option>
-                <option value="Staging">Staging</option>
-                <option value="Development">Development</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="w-full">
-            <Input
-              label="Documentation URL"
-              value={documentationUrl}
-              onChange={(e) => setDocumentationUrl(e.target.value)}
-              placeholder="https://docs.company.com/api"
-            />
-          </div>
-        </div>
-
-        {/* Section 3: Health Check */}
-        <div className="p-5 rounded-lg border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-888 card-shadow space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-850 pb-2">
-            <div className="flex items-center gap-2">
-              <Activity size={14} className="text-slate-555 dark:text-slate-400" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                3. Health Check
-              </h3>
+        <CardContent className="space-y-8">
+          {/* Basic Information */}
+          <section className="space-y-5">
+            <div>
+              <h3 className="text-sm font-semibold">Basic Information</h3>
+              <p className="mt-1 text-xs text-muted-foreground">Identify your API and provide its endpoint.</p>
             </div>
 
-            {/* Toggle switch for Enable Health Check */}
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                {healthEnabled ? 'Enabled' : 'Disabled'}
-              </span>
-              <button
-                type="button"
-                onClick={() => setHealthEnabled(prev => !prev)}
-                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${healthEnabled ? 'bg-slate-900 dark:bg-slate-50' : 'bg-slate-200 dark:bg-slate-800'
-                  }`}
-              >
-                <span
-                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full shadow-xs ring-0 transition duration-200 ease-in-out ${healthEnabled
-                    ? 'translate-x-4 bg-white dark:bg-slate-950'
-                    : 'translate-x-0 bg-white dark:bg-slate-400'
-                    }`}
-                />
-              </button>
-            </div>
-          </div>
-
-          {healthEnabled && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 fade-in">
-              <div className="md:col-span-2">
+            <div className="grid gap-5 sm:grid-cols-2">
+              {/* Name */}
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="name">API Name</Label>
                 <Input
-                  id="input-healthEndpoint"
-                  label="Health Check Endpoint"
-                  value={healthEndpoint}
-                  onChange={(e) => setHealthEndpoint(e.target.value)}
-                  placeholder="/health"
-                  error={errors.healthEndpoint}
+                  id="name" name="name"
+                  value={formData.name} onChange={handleChange}
+                  placeholder="Payments API"
+                  className={errors.name ? "border-red-500 focus-visible:ring-red-500/20" : ""}
+                />
+                {errors.name && <p className="text-xs text-red-500">{errors.name}</p>}
+              </div>
+
+              {/* Description */}
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="description">Description <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                <Textarea
+                  id="description" name="description"
+                  value={formData.description} onChange={handleChange}
+                  placeholder="Describe what this API does..."
+                  rows={3} className="resize-none"
                 />
               </div>
-              <div className="flex flex-col gap-1.5 text-left">
-                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                  HTTP Method
-                </label>
-                <select
-                  value={healthMethod}
-                  onChange={(e) => setHealthMethod(e.target.value as any)}
-                  className="w-full px-3 py-1.5 text-xs rounded-md border bg-transparent text-slate-900 dark:text-slate-50 border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-950 dark:focus:ring-slate-350 focus:border-slate-400 dark:focus:border-slate-700 transition-all cursor-pointer"
-                >
-                  <option value="GET">GET</option>
-                  <option value="POST">POST</option>
-                </select>
+
+              {/* Base URL */}
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="baseUrl">Base URL</Label>
+                <Input
+                  id="baseUrl" name="baseUrl"
+                  value={formData.baseUrl} onChange={handleChange}
+                  placeholder="https://api.example.com"
+                  className={`font-mono text-sm ${errors.baseUrl ? "border-red-500 focus-visible:ring-red-500/20" : ""}`}
+                />
+                {errors.baseUrl && <p className="text-xs text-red-500">{errors.baseUrl}</p>}
+              </div>
+
+              {/* Version */}
+              <div className="space-y-2">
+                <Label>Version</Label>
+                <Select value={formData.version} onValueChange={v => setFormData(p => ({ ...p, version: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="v1">v1</SelectItem>
+                    <SelectItem value="v2">v2</SelectItem>
+                    <SelectItem value="v3">v3</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Environment */}
+              <div className="space-y-2">
+                <Label>Environment</Label>
+                <Select value={formData.environment} onValueChange={v => setFormData(p => ({ ...p, environment: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="production">Production</SelectItem>
+                    <SelectItem value="staging">Staging</SelectItem>
+                    <SelectItem value="development">Development</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Group */}
+              <div className="space-y-2 sm:col-span-2">
+                <Label>API Group</Label>
+                <Select value={formData.group} onValueChange={v => setFormData(p => ({ ...p, group: v as APIGroup }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Payments">Payments</SelectItem>
+                    <SelectItem value="Authentication">Authentication</SelectItem>
+                    <SelectItem value="Users">Users</SelectItem>
+                    <SelectItem value="Orders">Orders</SelectItem>
+                    <SelectItem value="Notifications">Notifications</SelectItem>
+                    <SelectItem value="Other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
-          )}
-        </div>
+          </section>
 
-        {/* Section 4: Authentication */}
-        <div className="p-5 rounded-lg border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 card-shadow space-y-4">
-          <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-850 pb-2">
-            <Lock size={14} className="text-slate-550 dark:text-slate-400" />
-            <h3 className="font-bold text-xs uppercase tracking-wider text-slate-800 dark:text-slate-200">
-              4. Authentication Configuration
-            </h3>
-          </div>
+          <Separator />
 
-          {/* Authentication Type Select */}
-          <div className="flex flex-col gap-2 text-left">
-            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-              Authentication Type
-            </label>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {(['None', 'API Key', 'Bearer Token', 'OAuth 2.0'] as APIAuthType[]).map(type => (
-                <button
-                  type="button"
-                  key={type}
-                  onClick={() => setAuthType(type)}
-                  className={`py-1.5 px-3 text-[11px] font-bold uppercase rounded-md border transition-cozy cursor-pointer ${authType === type
-                    ? 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-50 shadow-3xs'
-                    : 'bg-transparent border-slate-200 dark:border-slate-800 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900'
-                    }`}
-                >
-                  {type}
-                </button>
+          {/* Authentication */}
+          <section className="space-y-5">
+            <div>
+              <h3 className="text-sm font-semibold">Authentication</h3>
+              <p className="mt-1 text-xs text-muted-foreground">Select how clients will authenticate with your API.</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Authentication Method</Label>
+              <Select value={formData.authentication} onValueChange={v => setFormData(p => ({ ...p, authentication: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="api-key">API Key</SelectItem>
+                  <SelectItem value="bearer">Bearer Token</SelectItem>
+                  <SelectItem value="oauth2">OAuth 2.0</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </section>
+
+          <Separator />
+
+          {/* Permissions */}
+          <section className="space-y-5">
+            <div>
+              <h3 className="text-sm font-semibold">API Permissions</h3>
+              <p className="mt-1 text-xs text-muted-foreground">Choose what this API key can access.</p>
+            </div>
+            <div className="space-y-3">
+              {([
+                { id: "read", title: "Read", desc: "Allow reading API resources." },
+                { id: "write", title: "Write", desc: "Allow creating and modifying resources." },
+                { id: "delete", title: "Delete", desc: "Allow deleting resources." },
+              ] as const).map(p => (
+                <div key={p.id} className="flex items-center justify-between rounded-lg border p-4">
+                  <div>
+                    <Label htmlFor={p.id} className="cursor-pointer font-medium">{p.title}</Label>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{p.desc}</p>
+                  </div>
+                  <Checkbox
+                    id={p.id}
+                    checked={scopes[p.id]}
+                    onCheckedChange={c => setScopes(prev => ({ ...prev, [p.id]: c === true }))}
+                  />
+                </div>
               ))}
             </div>
+          </section>
+
+          <Separator />
+
+          {/* Actions */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+            <Button variant="outline" onClick={() => navigate("/monitoring/dashboard")}>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit}>
+              <Plus className="mr-1.5 h-4 w-4" /> Register API
+            </Button>
           </div>
+        </CardContent>
+      </Card>
 
-          {/* Conditional Input Fields */}
-          {authType === 'API Key' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1 fade-in">
-              <Input
-                label="API Key Name"
-                value={apiKeyName}
-                onChange={(e) => setApiKeyName(e.target.value)}
-                placeholder="X-API-Key"
-              />
-              <Input
-                label="Header Name"
-                value={apiHeaderName}
-                onChange={(e) => setApiHeaderName(e.target.value)}
-                placeholder="Authorization"
-              />
+      {/* Right Panel */}
+      <div className="space-y-6">
+        {/* Security tips */}
+        <Card>
+          <CardHeader>
+            <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-foreground text-background">
+              <ShieldCheck className="h-5 w-5" />
             </div>
-          )}
-
-          {authType === 'Bearer Token' && (
-            <div className="pt-1 fade-in">
-              <Input
-                label="Bearer Token Value"
-                value={tokenValue}
-                onChange={(e) => setTokenValue(e.target.value)}
-                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-              />
+            <CardTitle className="text-base">Secure Credentials</CardTitle>
+            <CardDescription>Best practices for managing your API keys safely.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2.5 text-xs text-muted-foreground">
+              {["Store credentials in environment variables", "Rotate keys regularly", "Never commit keys to Git", "Use the least-privilege scope"].map(tip => (
+                <div key={tip} className="flex items-start gap-2">
+                  <Check className="h-3.5 w-3.5 mt-0.5 shrink-0 text-emerald-500" />
+                  {tip}
+                </div>
+              ))}
             </div>
-          )}
+          </CardContent>
+        </Card>
 
-          {authType === 'OAuth 2.0' && (
-            <div className="space-y-4 pt-1 fade-in">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  label="Client ID"
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                  placeholder="client_id_dev_123"
-                />
-                <Input
-                  label="Client Secret"
-                  value={clientSecret}
-                  onChange={(e) => setClientSecret(e.target.value)}
-                  placeholder="••••••••••••••••••••••••"
-                  type="password"
-                />
-              </div>
-              <Input
-                label="Token URL"
-                value={tokenUrl}
-                onChange={(e) => setTokenUrl(e.target.value)}
-                placeholder="https://api.company.com/oauth/token"
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Section 5: Tags */}
-        <div className="p-5 rounded-lg border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 card-shadow space-y-4">
-          <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-850 pb-2">
-            <Tag size={14} className="text-slate-550 dark:text-slate-400" />
-            <h3 className="font-bold text-xs uppercase tracking-wider text-slate-800 dark:text-slate-200">
-              5. Tags & Classifications
-            </h3>
-          </div>
-
-          <div className="space-y-3">
-            <Input
-              label="Add Tags"
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={handleAddTag}
-              placeholder="Type tag name and press Enter (e.g. payments, internal)"
-              helperText="Press Enter or comma to append tag chip."
-            />
-
-            {/* Display tags */}
-            {tags.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 pt-1 fade-in">
-                {tags.map(tag => (
-                  <span
-                    key={tag}
-                    className="inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 rounded"
+        {/* Registration summary */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Registration Summary</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            {[
+              { label: "Name", value: formData.name || <span className="text-muted-foreground">—</span> },
+              { label: "Version", value: formData.version },
+              {
+                label: "Environment",
+                value: (
+                  <Badge
+                    variant="outline"
+                    className={
+                      formData.environment === "production"
+                        ? "border-violet-500/30 bg-violet-500/10 text-violet-600 dark:text-violet-400"
+                        : formData.environment === "staging"
+                        ? "border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400"
+                        : "border-slate-500/30 bg-slate-500/10 text-slate-600 dark:text-slate-400"
+                    }
                   >
-                    <span>{tag}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveTag(tag)}
-                      className="p-0.5 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
-                    >
-                      <X size={10} />
-                    </button>
-                  </span>
-                ))}
+                    {ENV_MAP[formData.environment]}
+                  </Badge>
+                ),
+              },
+              { label: "Auth", value: authLabel },
+              { label: "Scopes", value: `${Object.values(scopes).filter(Boolean).length} selected` },
+            ].map((row, i) => (
+              <div key={i}>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-muted-foreground">{row.label}</span>
+                  <span className="font-medium text-right">{row.value}</span>
+                </div>
+                {i < 4 && <Separator className="mt-3" />}
               </div>
-            )}
-          </div>
-        </div>
+            ))}
+          </CardContent>
+        </Card>
 
-        {/* Action Form Buttons */}
-        <div className="flex justify-end gap-2 pt-4 border-t border-slate-200 dark:border-slate-850">
-          <Button
-            type="button"
-            variant="outline"
-            className="cursor-pointer font-semibold text-xs h-8"
-            onClick={() => setCurrentRoute('dashboard')}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            className="cursor-pointer font-semibold text-xs h-8"
-          >
-            Register API
-          </Button>
-        </div>
-      </form>
+        {/* API Key placeholder */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">API Credentials</CardTitle>
+            <CardDescription>Your key will be shown here after registration.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex min-h-[100px] items-center justify-center rounded-lg border border-dashed">
+              <div className="text-center">
+                <KeyRound className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
+                <p className="text-xs text-muted-foreground">Register the API to generate credentials</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
-};
+}
