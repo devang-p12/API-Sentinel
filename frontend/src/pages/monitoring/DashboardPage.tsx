@@ -264,10 +264,10 @@ export const DashboardPage: React.FC = () => {
                       <TableCell><span className="font-mono text-xs">{api.version}</span></TableCell>
                       <TableCell className="text-right pr-6" onClick={(e) => e.stopPropagation()}>
                         <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-7 w-7">
-                              <MoreVertical className="h-3.5 w-3.5" />
-                            </Button>
+                          <DropdownMenuTrigger
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
+                          >
+                            <MoreVertical className="h-3.5 w-3.5" />
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => setSelectedApiId(api.id)}>

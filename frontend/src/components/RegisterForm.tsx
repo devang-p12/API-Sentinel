@@ -1,371 +1,384 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useApi } from "@/context/ApiContext";
-import type { APIGroup, APIEnvironment, APIAuthType } from "@/types/api";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
-import { Check, CheckCircle2, Copy, KeyRound, Plus, RefreshCw, ShieldCheck } from "lucide-react";
+import {
+  Check,
+  Copy,
+  KeyRound,
+  Plus,
+  ShieldCheck,
+} from "lucide-react";
 
-type AuthMethod = "None" | "API Key" | "Bearer Token" | "OAuth 2.0";
-
-const ENV_MAP: Record<string, APIEnvironment> = {
-  development: "Development",
-  staging: "Staging",
-  production: "Production",
-};
-
-const AUTH_MAP: Record<string, APIAuthType> = {
-  "api-key": "API Key",
-  bearer: "Bearer Token",
-  oauth2: "OAuth 2.0",
-  none: "None",
-};
-
-export default function RegisterForm() {
-  const navigate = useNavigate();
-  const { addApi } = useApi();
+export function RegisterForm() {
+  const [apiKey, setApiKey] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const [formData, setFormData] = useState({
     name: "",
     description: "",
     baseUrl: "",
     version: "v1",
-    environment: "production",
-    group: "Other" as APIGroup,
+    environment: "development",
     authentication: "api-key",
   });
 
-  const [scopes, setScopes] = useState({ read: true, write: false, delete: false });
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [submitted, setSubmitted] = useState(false);
+  const [scopes, setScopes] = useState({
+    read: true,
+    write: false,
+    delete: false,
+  });
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-    if (errors[name]) setErrors(prev => ({ ...prev, [name]: "" }));
+
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
   };
 
-  const validate = () => {
-    const errs: Record<string, string> = {};
-    if (!formData.name.trim()) errs.name = "API name is required";
-    if (!formData.baseUrl.trim()) {
-      errs.baseUrl = "Base URL is required";
-    } else {
-      try { new URL(formData.baseUrl); } catch { errs.baseUrl = "Must be a valid URL (https://...)"; }
-    }
-    return errs;
+  const generateApiKey = () => {
+    const randomPart = crypto.randomUUID().replace(/-/g, "");
+
+    setApiKey(`sk_${formData.environment}_${randomPart}`);
+    setCopied(false);
   };
 
-  const handleSubmit = () => {
-    const errs = validate();
-    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
+  const copyApiKey = async () => {
+    if (!apiKey) return;
 
-    addApi({
-      name: formData.name.trim(),
-      description: formData.description.trim(),
-      version: formData.version,
-      group: formData.group,
-      baseUrl: formData.baseUrl.trim(),
-      environment: ENV_MAP[formData.environment] ?? "Production",
-      authType: AUTH_MAP[formData.authentication] ?? "None",
-      healthEndpoint: "/health",
-      healthMethod: "GET",
-      healthEnabled: true,
-      tags: [],
-    });
+    await navigator.clipboard.writeText(apiKey);
+    setCopied(true);
 
-    setSubmitted(true);
+    setTimeout(() => {
+      setCopied(false);
+    }, 2000);
   };
-
-  const resetForm = () => {
-    setFormData({ name: "", description: "", baseUrl: "", version: "v1", environment: "production", group: "Other", authentication: "api-key" });
-    setScopes({ read: true, write: false, delete: false });
-    setErrors({});
-    setSubmitted(false);
-  };
-
-  if (submitted) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center p-8">
-        <Card className="w-full max-w-md text-center">
-          <CardContent className="flex flex-col items-center gap-5 p-10">
-            <div className="rounded-full bg-emerald-500/10 p-4">
-              <CheckCircle2 className="h-8 w-8 text-emerald-600" />
-            </div>
-            <div className="space-y-1">
-              <h2 className="text-lg font-semibold tracking-tight">API Registered</h2>
-              <p className="text-sm text-muted-foreground">
-                <span className="font-medium text-foreground">{formData.name}</span> has been added to your API registry.
-              </p>
-            </div>
-            <div className="flex gap-2 w-full">
-              <Button variant="outline" className="flex-1" onClick={resetForm}>Register Another</Button>
-              <Button className="flex-1" onClick={() => navigate("/monitoring/dashboard")}>View Dashboard</Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  const authLabel = formData.authentication === "api-key" ? "API Key"
-    : formData.authentication === "oauth2" ? "OAuth 2.0" : "Bearer Token";
 
   return (
-    <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
-      {/* Left: Form */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-foreground text-background">
-              <KeyRound className="h-5 w-5" />
-            </div>
-            <div>
-              <CardTitle>API Configuration</CardTitle>
-              <CardDescription>Enter the details of your API endpoint.</CardDescription>
-            </div>
+    <Card className="border-black/10 shadow-none">
+      <CardHeader>
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-black text-white">
+            <KeyRound className="h-5 w-5" />
           </div>
-        </CardHeader>
 
-        <CardContent className="space-y-8">
-          {/* Basic Information */}
-          <section className="space-y-5">
-            <div>
-              <h3 className="text-sm font-semibold">Basic Information</h3>
-              <p className="mt-1 text-xs text-muted-foreground">Identify your API and provide its endpoint.</p>
+          <div>
+            <CardTitle>Register API</CardTitle>
+            <CardDescription>
+              Configure your API and generate credentials.
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-8">
+        {/* Basic Information */}
+        <section className="space-y-5">
+          <div>
+            <h3 className="text-sm font-semibold">
+              Basic Information
+            </h3>
+
+            <p className="mt-1 text-xs text-black/50">
+              Provide the basic details of your API.
+            </p>
+          </div>
+
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="name">API Name</Label>
+
+              <Input
+                id="name"
+                name="name"
+                value={formData.name}
+                onChange={handleChange}
+                placeholder="Payments API"
+                className="border-black/20 focus-visible:ring-black"
+              />
             </div>
 
-            <div className="grid gap-5 sm:grid-cols-2">
-              {/* Name */}
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="name">API Name</Label>
-                <Input
-                  id="name" name="name"
-                  value={formData.name} onChange={handleChange}
-                  placeholder="Payments API"
-                  className={errors.name ? "border-red-500 focus-visible:ring-red-500/20" : ""}
-                />
-                {errors.name && <p className="text-xs text-red-500">{errors.name}</p>}
-              </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="description">
+                Description
+              </Label>
 
-              {/* Description */}
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="description">Description <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                <Textarea
-                  id="description" name="description"
-                  value={formData.description} onChange={handleChange}
-                  placeholder="Describe what this API does..."
-                  rows={3} className="resize-none"
-                />
-              </div>
-
-              {/* Base URL */}
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="baseUrl">Base URL</Label>
-                <Input
-                  id="baseUrl" name="baseUrl"
-                  value={formData.baseUrl} onChange={handleChange}
-                  placeholder="https://api.example.com"
-                  className={`font-mono text-sm ${errors.baseUrl ? "border-red-500 focus-visible:ring-red-500/20" : ""}`}
-                />
-                {errors.baseUrl && <p className="text-xs text-red-500">{errors.baseUrl}</p>}
-              </div>
-
-              {/* Version */}
-              <div className="space-y-2">
-                <Label>Version</Label>
-                <Select value={formData.version} onValueChange={v => setFormData(p => ({ ...p, version: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="v1">v1</SelectItem>
-                    <SelectItem value="v2">v2</SelectItem>
-                    <SelectItem value="v3">v3</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Environment */}
-              <div className="space-y-2">
-                <Label>Environment</Label>
-                <Select value={formData.environment} onValueChange={v => setFormData(p => ({ ...p, environment: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="production">Production</SelectItem>
-                    <SelectItem value="staging">Staging</SelectItem>
-                    <SelectItem value="development">Development</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Group */}
-              <div className="space-y-2 sm:col-span-2">
-                <Label>API Group</Label>
-                <Select value={formData.group} onValueChange={v => setFormData(p => ({ ...p, group: v as APIGroup }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Payments">Payments</SelectItem>
-                    <SelectItem value="Authentication">Authentication</SelectItem>
-                    <SelectItem value="Users">Users</SelectItem>
-                    <SelectItem value="Orders">Orders</SelectItem>
-                    <SelectItem value="Notifications">Notifications</SelectItem>
-                    <SelectItem value="Other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <Textarea
+                id="description"
+                name="description"
+                value={formData.description}
+                onChange={handleChange}
+                placeholder="Describe what this API does..."
+                rows={4}
+                className="resize-none border-black/20 focus-visible:ring-black"
+              />
             </div>
-          </section>
 
-          <Separator />
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="baseUrl">
+                Base URL
+              </Label>
 
-          {/* Authentication */}
-          <section className="space-y-5">
-            <div>
-              <h3 className="text-sm font-semibold">Authentication</h3>
-              <p className="mt-1 text-xs text-muted-foreground">Select how clients will authenticate with your API.</p>
+              <Input
+                id="baseUrl"
+                name="baseUrl"
+                value={formData.baseUrl}
+                onChange={handleChange}
+                placeholder="https://api.example.com"
+                className="border-black/20 font-mono focus-visible:ring-black"
+              />
             </div>
+
             <div className="space-y-2">
-              <Label>Authentication Method</Label>
-              <Select value={formData.authentication} onValueChange={v => setFormData(p => ({ ...p, authentication: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Label>API Version</Label>
+
+              <Select
+                value={formData.version}
+                onValueChange={(value) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    version: value,
+                  }))
+                }
+              >
+                <SelectTrigger className="border-black/20 focus:ring-black">
+                  <SelectValue />
+                </SelectTrigger>
+
                 <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  <SelectItem value="api-key">API Key</SelectItem>
-                  <SelectItem value="bearer">Bearer Token</SelectItem>
-                  <SelectItem value="oauth2">OAuth 2.0</SelectItem>
+                  <SelectItem value="v1">v1</SelectItem>
+                  <SelectItem value="v2">v2</SelectItem>
+                  <SelectItem value="v3">v3</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-          </section>
 
-          <Separator />
+            <div className="space-y-2">
+              <Label>Environment</Label>
 
-          {/* Permissions */}
-          <section className="space-y-5">
-            <div>
-              <h3 className="text-sm font-semibold">API Permissions</h3>
-              <p className="mt-1 text-xs text-muted-foreground">Choose what this API key can access.</p>
+              <Select
+                value={formData.environment}
+                onValueChange={(value) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    environment: value,
+                  }))
+                }
+              >
+                <SelectTrigger className="border-black/20 focus:ring-black">
+                  <SelectValue />
+                </SelectTrigger>
+
+                <SelectContent>
+                  <SelectItem value="development">
+                    Development
+                  </SelectItem>
+
+                  <SelectItem value="staging">
+                    Staging
+                  </SelectItem>
+
+                  <SelectItem value="production">
+                    Production
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <div className="space-y-3">
-              {([
-                { id: "read", title: "Read", desc: "Allow reading API resources." },
-                { id: "write", title: "Write", desc: "Allow creating and modifying resources." },
-                { id: "delete", title: "Delete", desc: "Allow deleting resources." },
-              ] as const).map(p => (
-                <div key={p.id} className="flex items-center justify-between rounded-lg border p-4">
-                  <div>
-                    <Label htmlFor={p.id} className="cursor-pointer font-medium">{p.title}</Label>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{p.desc}</p>
-                  </div>
-                  <Checkbox
-                    id={p.id}
-                    checked={scopes[p.id]}
-                    onCheckedChange={c => setScopes(prev => ({ ...prev, [p.id]: c === true }))}
-                  />
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <Separator />
-
-          {/* Actions */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <Button variant="outline" onClick={() => navigate("/monitoring/dashboard")}>
-              Cancel
-            </Button>
-            <Button onClick={handleSubmit}>
-              <Plus className="mr-1.5 h-4 w-4" /> Register API
-            </Button>
           </div>
-        </CardContent>
-      </Card>
+        </section>
 
-      {/* Right Panel */}
-      <div className="space-y-6">
-        {/* Security tips */}
-        <Card>
-          <CardHeader>
-            <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-foreground text-background">
-              <ShieldCheck className="h-5 w-5" />
-            </div>
-            <CardTitle className="text-base">Secure Credentials</CardTitle>
-            <CardDescription>Best practices for managing your API keys safely.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2.5 text-xs text-muted-foreground">
-              {["Store credentials in environment variables", "Rotate keys regularly", "Never commit keys to Git", "Use the least-privilege scope"].map(tip => (
-                <div key={tip} className="flex items-start gap-2">
-                  <Check className="h-3.5 w-3.5 mt-0.5 shrink-0 text-emerald-500" />
-                  {tip}
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        <Separator className="bg-black/10" />
 
-        {/* Registration summary */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Registration Summary</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
+        {/* Authentication */}
+        <section className="space-y-5">
+          <div>
+            <h3 className="text-sm font-semibold">
+              Authentication
+            </h3>
+
+            <p className="mt-1 text-xs text-black/50">
+              Select how clients authenticate with your API.
+            </p>
+          </div>
+
+          <Select
+            value={formData.authentication}
+            onValueChange={(value) =>
+              setFormData((prev) => ({
+                ...prev,
+                authentication: value,
+              }))
+            }
+          >
+            <SelectTrigger className="border-black/20 focus:ring-black">
+              <SelectValue />
+            </SelectTrigger>
+
+            <SelectContent>
+              <SelectItem value="api-key">
+                API Key
+              </SelectItem>
+
+              <SelectItem value="bearer">
+                Bearer Token
+              </SelectItem>
+
+              <SelectItem value="oauth2">
+                OAuth 2.0
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </section>
+
+        <Separator className="bg-black/10" />
+
+        {/* Permissions */}
+        <section className="space-y-5">
+          <div>
+            <h3 className="text-sm font-semibold">
+              Permissions
+            </h3>
+
+            <p className="mt-1 text-xs text-black/50">
+              Select what this API key can access.
+            </p>
+          </div>
+
+          <div className="space-y-3">
             {[
-              { label: "Name", value: formData.name || <span className="text-muted-foreground">—</span> },
-              { label: "Version", value: formData.version },
               {
-                label: "Environment",
-                value: (
-                  <Badge
-                    variant="outline"
-                    className={
-                      formData.environment === "production"
-                        ? "border-violet-500/30 bg-violet-500/10 text-violet-600 dark:text-violet-400"
-                        : formData.environment === "staging"
-                        ? "border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400"
-                        : "border-slate-500/30 bg-slate-500/10 text-slate-600 dark:text-slate-400"
-                    }
-                  >
-                    {ENV_MAP[formData.environment]}
-                  </Badge>
-                ),
+                id: "read",
+                title: "Read",
+                description: "Read API resources.",
               },
-              { label: "Auth", value: authLabel },
-              { label: "Scopes", value: `${Object.values(scopes).filter(Boolean).length} selected` },
-            ].map((row, i) => (
-              <div key={i}>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-muted-foreground">{row.label}</span>
-                  <span className="font-medium text-right">{row.value}</span>
+              {
+                id: "write",
+                title: "Write",
+                description: "Create and modify resources.",
+              },
+              {
+                id: "delete",
+                title: "Delete",
+                description: "Delete API resources.",
+              },
+            ].map((permission) => (
+              <div
+                key={permission.id}
+                className="flex items-center justify-between rounded-lg border border-black/10 p-4"
+              >
+                <div>
+                  <Label
+                    htmlFor={permission.id}
+                    className="cursor-pointer font-medium"
+                  >
+                    {permission.title}
+                  </Label>
+
+                  <p className="mt-1 text-xs text-black/50">
+                    {permission.description}
+                  </p>
                 </div>
-                {i < 4 && <Separator className="mt-3" />}
+
+                <Checkbox
+                  id={permission.id}
+                  checked={
+                    scopes[
+                    permission.id as keyof typeof scopes
+                    ]
+                  }
+                  onCheckedChange={(checked) =>
+                    setScopes((prev) => ({
+                      ...prev,
+                      [permission.id]: checked === true,
+                    }))
+                  }
+                  className="border-black data-[state=checked]:bg-black data-[state=checked]:text-white"
+                />
               </div>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </section>
 
-        {/* API Key placeholder */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">API Credentials</CardTitle>
-            <CardDescription>Your key will be shown here after registration.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex min-h-[100px] items-center justify-center rounded-lg border border-dashed">
-              <div className="text-center">
-                <KeyRound className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
-                <p className="text-xs text-muted-foreground">Register the API to generate credentials</p>
+        <Separator className="bg-black/10" />
+
+        {/* Generate API Key */}
+        <section className="space-y-4">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4" />
+
+            <h3 className="text-sm font-semibold">
+              API Credentials
+            </h3>
+          </div>
+
+          {apiKey ? (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-black/10 bg-black/[0.03] p-4">
+                <code className="break-all text-xs">
+                  {apiKey}
+                </code>
               </div>
+
+              <Button
+                type="button"
+                variant="outline"
+                onClick={copyApiKey}
+                className="w-full border-black/20 hover:bg-black hover:text-white"
+              >
+                {copied ? (
+                  <>
+                    <Check className="mr-2 h-4 w-4" />
+                    Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copy API Key
+                  </>
+                )}
+              </Button>
             </div>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-black/15 p-8 text-center">
+              <KeyRound className="mx-auto mb-2 h-5 w-5 text-black/30" />
+
+              <p className="text-xs text-black/40">
+                No API key generated yet.
+              </p>
+            </div>
+          )}
+
+          <Button
+            type="button"
+            onClick={generateApiKey}
+            className="w-full bg-black text-white hover:bg-black/80"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            {apiKey ? "Regenerate API Key" : "Register API"}
+          </Button>
+        </section>
+      </CardContent>
+    </Card>
   );
 }

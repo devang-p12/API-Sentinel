@@ -117,7 +117,7 @@ export const ApiProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [currentRoute, setCurrentRoute] = useState<'dashboard' | 'register'>('dashboard');
   const [selectedApiId, setSelectedApiId] = useState<string | null>(null);
-  
+
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const savedTheme = localStorage.getItem('api_sentinel_theme');
     return (savedTheme as 'light' | 'dark') || 'dark'; // Dark theme first by default
