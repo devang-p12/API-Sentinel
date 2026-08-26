@@ -1,6 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { API, APIStatus } from '../types/api';
-
 
 interface ApiContextType {
   apis: API[];
@@ -70,42 +69,6 @@ const initialApis: API[] = [
     tags: ['auth', 'security', 'internal'],
     createdAt: '2026-08-11T14:30:00Z',
     group: 'Authentication'
-  },
-  {
-    id: 'api-3',
-    name: 'User Service',
-    description: 'Manages user profiles, preferences, and organization mapping.',
-    version: 'v1.4',
-    baseUrl: 'https://api.company.com/users',
-    environment: 'Staging',
-    status: 'Active',
-    healthEndpoint: '/healthz',
-    healthMethod: 'GET',
-    healthEnabled: true,
-    authType: 'Bearer Token',
-    authConfig: {
-      tokenValue: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
-    },
-    documentationUrl: 'https://docs.company.com/users',
-    tags: ['users', 'internal'],
-    createdAt: '2026-08-12T09:15:00Z',
-    group: 'Users'
-  },
-  {
-    id: 'api-4',
-    name: 'Notification API',
-    description: 'Relays email, push alerts, and SMS text message payloads to external microservices.',
-    version: 'v1.0',
-    baseUrl: 'https://api.company.com/notifications',
-    environment: 'Development',
-    status: 'Inactive',
-    healthEndpoint: '/health/status',
-    healthMethod: 'GET',
-    healthEnabled: false,
-    authType: 'None',
-    tags: ['notifications', 'async'],
-    createdAt: '2026-08-14T17:45:00Z',
-    group: 'Notifications'
   }
 ];
 
@@ -120,7 +83,7 @@ export const ApiProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const savedTheme = localStorage.getItem('api_sentinel_theme');
-    return (savedTheme as 'light' | 'dark') || 'dark'; // Dark theme first by default
+    return (savedTheme as 'light' | 'dark') || 'dark';
   });
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -128,11 +91,6 @@ export const ApiProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [envFilter, setEnvFilter] = useState('all');
   const [sortBy, setSortBy] = useState<'name' | 'createdAt' | 'version'>('createdAt');
   const [isRefreshing, setIsRefreshing] = useState(false);
-
-  // Save APIs to localStorage when they change
-  useEffect(() => {
-    localStorage.setItem('api_sentinel_data', JSON.stringify(apis));
-  }, [apis]);
 
   // Sync theme with HTML class
   useEffect(() => {
@@ -145,6 +103,66 @@ export const ApiProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('api_sentinel_theme', theme);
   }, [theme]);
 
+  // Load registered APIs from PostgreSQL Backend
+  const loadApisFromBackend = useCallback(async () => {
+    try {
+      const response = await fetch('/api/apis');
+      if (!response.ok) return;
+
+      const data = await response.json();
+      if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+        const mappedApis: API[] = data.data.map((item: any) => {
+          const rawEnv = (item.environment || 'development').toLowerCase();
+          const normalizedEnv =
+            rawEnv === 'production'
+              ? 'Production'
+              : rawEnv === 'staging'
+              ? 'Staging'
+              : 'Development';
+
+          return {
+            id: String(item.id),
+            name: item.name,
+            description: item.description || '',
+            version: item.version || 'v1',
+            baseUrl: item.baseUrl || '',
+            environment: normalizedEnv,
+            status: (item.status as APIStatus) || 'Active',
+            healthEndpoint: '/health',
+            healthMethod: 'GET',
+            healthEnabled: true,
+            authType:
+              item.authentication === 'api-key'
+                ? 'API Key'
+                : item.authentication === 'bearer'
+                ? 'Bearer Token'
+                : item.authentication === 'oauth2'
+                ? 'OAuth 2.0'
+                : 'None',
+            authConfig: item.authConfig || {},
+            tags: [rawEnv],
+            createdAt: item.createdAt || new Date().toISOString(),
+            group: 'Other',
+          };
+        });
+
+        setApis(mappedApis);
+        localStorage.setItem('api_sentinel_data', JSON.stringify(mappedApis));
+      }
+    } catch (err) {
+      console.warn('Backend not yet reachable, continuing with local cache:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadApisFromBackend();
+  }, [loadApisFromBackend]);
+
+  // Save APIs to localStorage when updated
+  useEffect(() => {
+    localStorage.setItem('api_sentinel_data', JSON.stringify(apis));
+  }, [apis]);
+
   const toggleTheme = () => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
   };
@@ -153,17 +171,28 @@ export const ApiProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newApi: API = {
       ...newApiData,
       id: `api-${Date.now()}`,
-      status: 'Active', // Default status for new APIs
+      status: 'Active',
       createdAt: new Date().toISOString()
     };
     setApis(prev => [newApi, ...prev]);
     setCurrentRoute('dashboard');
   };
 
-  const deleteApi = (id: string) => {
+  const deleteApi = async (id: string) => {
+    // Optimistic UI removal
     setApis(prev => prev.filter(api => api.id !== id));
     if (selectedApiId === id) {
       setSelectedApiId(null);
+    }
+
+    // If ID is numeric, delete from PostgreSQL database
+    const numId = parseInt(id, 10);
+    if (!isNaN(numId)) {
+      try {
+        await fetch(`/api/apis/${numId}`, { method: 'DELETE' });
+      } catch (err) {
+        console.error('Failed to delete API from database:', err);
+      }
     }
   };
 
@@ -175,19 +204,11 @@ export const ApiProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const refreshApis = () => {
     setIsRefreshing(true);
-    // Simulate API health check refresh delays
-    setTimeout(() => {
-      setApis(prev =>
-        prev.map(api => {
-          if (!api.healthEnabled) return api;
-          // Randomly change status to add dynamic element to monitoring simulation
-          // 90% chance it is active
-          const nextStatus: APIStatus = Math.random() > 0.1 ? 'Active' : 'Inactive';
-          return { ...api, status: nextStatus };
-        })
-      );
-      setIsRefreshing(false);
-    }, 1200);
+    loadApisFromBackend().finally(() => {
+      setTimeout(() => {
+        setIsRefreshing(false);
+      }, 500);
+    });
   };
 
   return (
