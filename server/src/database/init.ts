@@ -75,6 +75,13 @@ async function initDatabase() {
         request_body JSONB DEFAULT NULL,
         expected_status INT DEFAULT 200,
         application_id INT REFERENCES applications(id) ON DELETE SET NULL,
+        monitoring_enabled BOOLEAN DEFAULT false,
+        monitoring_interval INT DEFAULT 60,
+        timeout INT DEFAULT 5000,
+        degraded_threshold_ms INT DEFAULT 1000,
+        health_status VARCHAR(20) DEFAULT 'HEALTHY',
+        consecutive_failures INT DEFAULT 0,
+        last_monitored_at TIMESTAMP WITH TIME ZONE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
@@ -95,6 +102,13 @@ async function initDatabase() {
       ALTER TABLE apis ADD COLUMN IF NOT EXISTS request_body JSONB DEFAULT NULL;
       ALTER TABLE apis ADD COLUMN IF NOT EXISTS expected_status INT DEFAULT 200;
       ALTER TABLE apis ADD COLUMN IF NOT EXISTS application_id INT REFERENCES applications(id) ON DELETE SET NULL;
+      ALTER TABLE apis ADD COLUMN IF NOT EXISTS monitoring_enabled BOOLEAN DEFAULT false;
+      ALTER TABLE apis ADD COLUMN IF NOT EXISTS monitoring_interval INT DEFAULT 60;
+      ALTER TABLE apis ADD COLUMN IF NOT EXISTS timeout INT DEFAULT 5000;
+      ALTER TABLE apis ADD COLUMN IF NOT EXISTS degraded_threshold_ms INT DEFAULT 1000;
+      ALTER TABLE apis ADD COLUMN IF NOT EXISTS health_status VARCHAR(20) DEFAULT 'HEALTHY';
+      ALTER TABLE apis ADD COLUMN IF NOT EXISTS consecutive_failures INT DEFAULT 0;
+      ALTER TABLE apis ADD COLUMN IF NOT EXISTS last_monitored_at TIMESTAMP WITH TIME ZONE;
       ALTER TABLE apis ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
       ALTER TABLE apis ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
     `);
@@ -104,7 +118,26 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_apis_name ON apis(name);
       CREATE INDEX IF NOT EXISTS idx_apis_environment ON apis(environment);
       CREATE INDEX IF NOT EXISTS idx_apis_status ON apis(status);
+      CREATE INDEX IF NOT EXISTS idx_apis_health_status ON apis(health_status);
       CREATE INDEX IF NOT EXISTS idx_apis_created_at ON apis(created_at DESC);
+    `);
+
+    // 5.1 Ensure monitoring_logs table exists
+    await appClient.query(`
+      CREATE TABLE IF NOT EXISTS monitoring_logs (
+        id SERIAL PRIMARY KEY,
+        api_id INT REFERENCES apis(id) ON DELETE CASCADE,
+        timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        status_code INT,
+        response_time INT,
+        success BOOLEAN,
+        error_type VARCHAR(100),
+        error_message TEXT,
+        response_size INT
+      );
+      
+      CREATE INDEX IF NOT EXISTS idx_monitoring_logs_api_id ON monitoring_logs(api_id);
+      CREATE INDEX IF NOT EXISTS idx_monitoring_logs_timestamp ON monitoring_logs(timestamp DESC);
     `);
 
     // 6. Ensure load_test_runs table exists

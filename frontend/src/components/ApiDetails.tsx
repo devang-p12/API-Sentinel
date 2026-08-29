@@ -22,7 +22,8 @@ export const ApiDetails: React.FC = () => {
     selectedApiId, 
     setSelectedApiId, 
     deleteApi, 
-    updateApi 
+    updateApi,
+    updateMonitoringConfig
   } = useApi();
 
   const [copiedUrl, setCopiedUrl] = useState(false);
@@ -180,36 +181,94 @@ export const ApiDetails: React.FC = () => {
             </div>
           </div>
 
-          {/* Health Check settings */}
+          {/* Continuous Monitoring Settings */}
           <div className="space-y-2">
             <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">
-              Health Status Checks
+              Continuous Monitoring
             </span>
-            <div className="p-3 rounded-md border bg-transparent border-slate-200 dark:border-slate-800 space-y-2.5">
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                  <Activity size={11} /> Check Node Status
+            <div className="p-3 rounded-md border bg-transparent border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                  <Activity size={12} /> Enable Background Polling
                 </span>
-                <span className={`font-bold uppercase tracking-wider px-1.5 py-0.5 rounded text-[8px] border ${
-                  api.healthEnabled 
-                    ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' 
-                    : 'bg-slate-50 dark:bg-slate-900 text-slate-400 dark:text-slate-500 border-slate-150 dark:border-slate-800'
-                }`}>
-                  {api.healthEnabled ? 'Active Monitoring' : 'Disabled'}
-                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-[10px] px-2 border-slate-200 dark:border-slate-800"
+                  onClick={() => {
+                    if (updateMonitoringConfig) {
+                      updateMonitoringConfig(api.id, {
+                        monitoringEnabled: !api.monitoringEnabled,
+                        monitoringInterval: api.monitoringInterval || 60,
+                        timeout: api.timeout || 5000,
+                        degradedThresholdMs: api.degradedThresholdMs || 1000
+                      });
+                    }
+                  }}
+                >
+                  {api.monitoringEnabled ? (
+                    <span className="text-emerald-500 flex items-center gap-1"><ToggleRight size={12} /> ON</span>
+                  ) : (
+                    <span className="text-slate-400 flex items-center gap-1"><ToggleLeft size={12} /> OFF</span>
+                  )}
+                </Button>
               </div>
 
-              {api.healthEnabled && (
-                <div className="pt-2 border-t border-slate-150 dark:border-slate-850 grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <span className="text-[9px] text-slate-400 dark:text-slate-500 block mb-0.5">Method</span>
-                    <span className="font-bold text-slate-700 dark:text-slate-350">{api.healthMethod}</span>
+              {api.monitoringEnabled && (
+                <div className="pt-2 border-t border-slate-150 dark:border-slate-850 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] text-slate-400">Current Health</span>
+                    <span className={`font-bold px-1.5 py-0.5 rounded text-[9px] border ${
+                      api.healthStatus === 'DOWN' ? 'bg-rose-500/10 text-rose-600 border-rose-500/20' :
+                      api.healthStatus === 'DEGRADED' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' :
+                      'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+                    }`}>
+                      {api.healthStatus || 'HEALTHY'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-[9px] text-slate-400 block mb-0.5">Interval (s)</span>
+                      <input 
+                        type="number"
+                        className="w-full bg-slate-50 dark:bg-slate-950 px-1.5 py-1 rounded border border-slate-150 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-[10px]"
+                        value={api.monitoringInterval || 60}
+                        onChange={(e) => updateMonitoringConfig(api.id, {
+                          monitoringEnabled: true,
+                          monitoringInterval: parseInt(e.target.value) || 60,
+                          timeout: api.timeout || 5000,
+                          degradedThresholdMs: api.degradedThresholdMs || 1000
+                        })}
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-400 block mb-0.5">Timeout (ms)</span>
+                      <input 
+                        type="number"
+                        className="w-full bg-slate-50 dark:bg-slate-950 px-1.5 py-1 rounded border border-slate-150 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-[10px]"
+                        value={api.timeout || 5000}
+                        onChange={(e) => updateMonitoringConfig(api.id, {
+                          monitoringEnabled: true,
+                          monitoringInterval: api.monitoringInterval || 60,
+                          timeout: parseInt(e.target.value) || 5000,
+                          degradedThresholdMs: api.degradedThresholdMs || 1000
+                        })}
+                      />
+                    </div>
                   </div>
                   <div>
-                    <span className="text-[9px] text-slate-400 dark:text-slate-500 block mb-0.5">Endpoint</span>
-                    <span className="font-mono text-[10px] font-semibold bg-slate-50 dark:bg-slate-950 px-1 py-0.5 rounded border border-slate-150 dark:border-slate-800 text-slate-655 dark:text-slate-300 truncate max-w-full inline-block">
-                      {api.healthEndpoint}
-                    </span>
+                    <span className="text-[9px] text-slate-400 block mb-0.5">Degraded Threshold (ms)</span>
+                    <input 
+                      type="number"
+                      className="w-full bg-slate-50 dark:bg-slate-950 px-1.5 py-1 rounded border border-slate-150 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-[10px]"
+                      value={api.degradedThresholdMs || 1000}
+                      onChange={(e) => updateMonitoringConfig(api.id, {
+                        monitoringEnabled: true,
+                        monitoringInterval: api.monitoringInterval || 60,
+                        timeout: api.timeout || 5000,
+                        degradedThresholdMs: parseInt(e.target.value) || 1000
+                      })}
+                    />
                   </div>
                 </div>
               )}

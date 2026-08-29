@@ -1,0 +1,22 @@
+2026-08-29 18:57:20.801 IST [49404] LOG:  starting PostgreSQL 18.6 (Ubuntu 18.6-0ubuntu0.26.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, 64-bit
+2026-08-29 18:57:20.801 IST [49404] LOG:  listening on IPv4 address "127.0.0.1", port 5433
+2026-08-29 18:57:20.806 IST [49404] FATAL:  could not create lock file "/var/run/postgresql/.s.PGSQL.5433.lock": Permission denied
+2026-08-29 18:57:20.809 IST [49404] LOG:  database system is shut down
+2026-08-29 18:57:35.645 IST [49419] LOG:  starting PostgreSQL 18.6 (Ubuntu 18.6-0ubuntu0.26.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, 64-bit
+2026-08-29 18:57:35.645 IST [49419] LOG:  listening on IPv4 address "127.0.0.1", port 5433
+2026-08-29 18:57:35.650 IST [49419] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5433"
+2026-08-29 18:57:35.661 IST [49425] LOG:  database system was shut down at 2026-08-29 18:57:11 IST
+2026-08-29 18:57:35.668 IST [49419] LOG:  database system is ready to accept connections
+2026-08-29 18:57:45.990 IST [49445] FATAL:  database "api_user" does not exist
+2026-08-29 19:02:35.719 IST [49423] LOG:  checkpoint starting: time
+2026-08-29 19:04:20.194 IST [49423] LOG:  checkpoint complete: wrote 1040 buffers (6.3%), wrote 3 SLRU buffers; 1 WAL file(s) added, 0 removed, 0 recycled; write=104.204 s, sync=0.226 s, total=104.476 s; sync files=343, longest=0.005 s, average=0.001 s; distance=4876 kB, estimate=4876 kB; lsn=0/1C2D950, redo lsn=0/1C2D8C0
+2026-08-29 19:07:35.294 IST [49423] LOG:  checkpoint starting: time
+2026-08-29 19:07:36.139 IST [49423] LOG:  checkpoint complete: wrote 8 buffers (0.0%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.806 s, sync=0.015 s, total=0.845 s; sync files=9, longest=0.009 s, average=0.002 s; distance=4 kB, estimate=4389 kB; lsn=0/1C2EBB8, redo lsn=0/1C2EB28
+2026-08-29 19:17:35.321 IST [49423] LOG:  checkpoint starting: time
+2026-08-29 19:17:36.163 IST [49423] LOG:  checkpoint complete: wrote 8 buffers (0.0%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.806 s, sync=0.015 s, total=0.842 s; sync files=9, longest=0.005 s, average=0.002 s; distance=6 kB, estimate=3951 kB; lsn=0/1C306C0, redo lsn=0/1C30668
+2026-08-29 19:22:35.167 IST [49423] LOG:  checkpoint starting: time
+2026-08-29 19:22:40.658 IST [49423] LOG:  checkpoint complete: wrote 54 buffers (0.3%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=5.420 s, sync=0.048 s, total=5.491 s; sync files=48, longest=0.017 s, average=0.001 s; distance=259 kB, estimate=3582 kB; lsn=0/1C716F0, redo lsn=0/1C71660
+2026-08-29 19:32:35.852 IST [49423] LOG:  checkpoint starting: time
+2026-08-29 19:32:36.694 IST [49423] LOG:  checkpoint complete: wrote 8 buffers (0.0%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.806 s, sync=0.013 s, total=0.842 s; sync files=9, longest=0.008 s, average=0.002 s; distance=8 kB, estimate=3224 kB; lsn=0/1C73AA0, redo lsn=0/1C73A48
+2026-08-29 19:57:36.161 IST [49423] LOG:  checkpoint starting: time
+2026-08-29 19:57:38.327 IST [49423] LOG:  checkpoint complete: wrote 21 buffers (0.1%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=2.115 s, sync=0.017 s, total=2.170 s; sync files=19, longest=0.005 s, average=0.001 s; distance=28 kB, estimate=2905 kB; lsn=0/1C7AD08, redo lsn=0/1C7ACB0

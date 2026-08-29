@@ -1,0 +1,1 @@
+/usr/lib/postgresql/18/bin/postgres "-D" "/home/devang-patil/projects/API-Sentinel/server/local_db" "-p" "5433" "-k" "/tmp"

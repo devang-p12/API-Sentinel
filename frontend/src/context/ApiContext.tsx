@@ -6,6 +6,7 @@ interface ApiContextType {
   addApi: (api: Omit<API, 'id' | 'createdAt' | 'status'>) => void;
   deleteApi: (id: string) => void;
   updateApi: (id: string, api: Partial<API>) => void;
+  updateMonitoringConfig: (id: string, config: { monitoringEnabled: boolean; monitoringInterval: number; timeout: number; degradedThresholdMs: number }) => Promise<void>;
   currentRoute: 'dashboard' | 'register';
   setCurrentRoute: (route: 'dashboard' | 'register') => void;
   selectedApiId: string | null;
@@ -143,6 +144,13 @@ export const ApiProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             tags: [rawEnv],
             createdAt: item.createdAt || new Date().toISOString(),
             group: 'Other',
+            monitoringEnabled: item.monitoringEnabled || false,
+            monitoringInterval: item.monitoringInterval || 60,
+            timeout: item.timeout || 5000,
+            degradedThresholdMs: item.degradedThresholdMs || 1000,
+            healthStatus: item.healthStatus || 'HEALTHY',
+            consecutiveFailures: item.consecutiveFailures || 0,
+            lastMonitoredAt: item.lastMonitoredAt || null,
           };
         });
 
@@ -202,6 +210,33 @@ export const ApiProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
+  const updateMonitoringConfig = async (
+    apiId: string, 
+    config: { monitoringEnabled: boolean; monitoringInterval: number; timeout: number; degradedThresholdMs: number }
+  ) => {
+    const numId = parseInt(apiId, 10);
+    if (isNaN(numId)) return;
+
+    try {
+      const response = await fetch(`/api/monitoring/${numId}/config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      });
+      if (response.ok) {
+        const updated = await response.json();
+        updateApi(apiId, {
+          monitoringEnabled: updated.monitoring_enabled,
+          monitoringInterval: updated.monitoring_interval,
+          timeout: updated.timeout,
+          degradedThresholdMs: updated.degraded_threshold_ms
+        });
+      }
+    } catch (err) {
+      console.error('Failed to update monitoring config:', err);
+    }
+  };
+
   const refreshApis = () => {
     setIsRefreshing(true);
     loadApisFromBackend().finally(() => {
@@ -218,6 +253,7 @@ export const ApiProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addApi,
         deleteApi,
         updateApi,
+        updateMonitoringConfig,
         currentRoute,
         setCurrentRoute,
         selectedApiId,

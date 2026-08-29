@@ -30,7 +30,7 @@ export default function AppLayout() {
           </header>
 
           {/* Page Content */}
-          <main className="min-h-0 flex-1 overflow-hidden">
+          <main className="min-h-0 flex-1 overflow-auto">
             <Outlet />
           </main>
         </div>

@@ -152,7 +152,9 @@ export class K6Service {
       };
 
       try {
-        k6Process = spawn('k6', args, {
+        const localK6Path = path.resolve(__dirname, '../../bin/k6');
+        const k6Executable = fs.existsSync(localK6Path) ? localK6Path : 'k6';
+        k6Process = spawn(k6Executable, args, {
           env: envVars,
           windowsHide: true,
         });

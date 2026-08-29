@@ -29,4 +29,11 @@ export interface API {
   tags: string[];
   createdAt: string;
   group: APIGroup;
+  monitoringEnabled?: boolean;
+  monitoringInterval?: number;
+  timeout?: number;
+  degradedThresholdMs?: number;
+  healthStatus?: 'HEALTHY' | 'DEGRADED' | 'DOWN';
+  consecutiveFailures?: number;
+  lastMonitoredAt?: string;
 }

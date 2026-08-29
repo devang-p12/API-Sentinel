@@ -15,6 +15,10 @@ export interface CreateApiDTO {
   requestBody?: any;
   expectedStatus?: number;
   applicationId?: number;
+  monitoringEnabled?: boolean;
+  monitoringInterval?: number;
+  timeout?: number;
+  degradedThresholdMs?: number;
 }
 
 export class ApiRepository {
@@ -34,9 +38,13 @@ export class ApiRepository {
         headers,
         request_body,
         expected_status,
-        application_id
+        application_id,
+        monitoring_enabled,
+        monitoring_interval,
+        timeout,
+        degraded_threshold_ms
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       RETURNING 
         id,
         name,
@@ -53,6 +61,13 @@ export class ApiRepository {
         request_body AS "requestBody",
         expected_status AS "expectedStatus",
         application_id AS "applicationId",
+        monitoring_enabled AS "monitoringEnabled",
+        monitoring_interval AS "monitoringInterval",
+        timeout,
+        degraded_threshold_ms AS "degradedThresholdMs",
+        health_status AS "healthStatus",
+        consecutive_failures AS "consecutiveFailures",
+        last_monitored_at AS "lastMonitoredAt",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
     `;
@@ -72,6 +87,10 @@ export class ApiRepository {
       data.requestBody ? JSON.stringify(data.requestBody) : null,
       data.expectedStatus || 200,
       data.applicationId || null,
+      data.monitoringEnabled || false,
+      data.monitoringInterval || 60,
+      data.timeout || 5000,
+      data.degradedThresholdMs || 1000
     ];
 
     const result = await query(text, values);
@@ -96,6 +115,13 @@ export class ApiRepository {
         request_body AS "requestBody",
         expected_status AS "expectedStatus",
         application_id AS "applicationId",
+        monitoring_enabled AS "monitoringEnabled",
+        monitoring_interval AS "monitoringInterval",
+        timeout,
+        degraded_threshold_ms AS "degradedThresholdMs",
+        health_status AS "healthStatus",
+        consecutive_failures AS "consecutiveFailures",
+        last_monitored_at AS "lastMonitoredAt",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
       FROM apis
@@ -145,6 +171,13 @@ export class ApiRepository {
         request_body AS "requestBody",
         expected_status AS "expectedStatus",
         application_id AS "applicationId",
+        monitoring_enabled AS "monitoringEnabled",
+        monitoring_interval AS "monitoringInterval",
+        timeout,
+        degraded_threshold_ms AS "degradedThresholdMs",
+        health_status AS "healthStatus",
+        consecutive_failures AS "consecutiveFailures",
+        last_monitored_at AS "lastMonitoredAt",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
       FROM apis
