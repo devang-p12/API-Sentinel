@@ -121,3 +121,12 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Binaries & Executables
+bin/
+server/bin/
+*.exe
+*.dll
+*.so
+*.dylib
+

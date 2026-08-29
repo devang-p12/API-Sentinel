@@ -18,7 +18,7 @@ import { SchemaChangesPage } from "./pages/testing/SchemaChangesPage";
 // Insights
 import { EnvComparisonPage } from "./pages/insights/EnvComparisonPage";
 import { AlertsPage } from "./pages/insights/AlertsPage";
-import { AnalyticsPage } from "./pages/insights/AnalyticsPage";
+import { GlobalAnalyticsPage } from "./pages/monitoring/GlobalAnalyticsPage";
 
 // Admin
 import { SettingsPage } from "./pages/admin/SettingsPage";
@@ -85,7 +85,7 @@ export function App() {
 
           <Route
             path="/insights/analytics"
-            element={<AnalyticsPage />}
+            element={<GlobalAnalyticsPage />}
           />
 
           {/* Admin */}

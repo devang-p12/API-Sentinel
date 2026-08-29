@@ -37,3 +37,43 @@ export interface API {
   consecutiveFailures?: number;
   lastMonitoredAt?: string;
 }
+
+export interface AnalyticsMetrics {
+  totalChecks: number;
+  successfulChecks: number;
+  failedChecks: number;
+  uptime: number;
+  errorRate: number;
+  avgLatency: number;
+  minLatency: number;
+  maxLatency: number;
+  p50Latency: number;
+  p95Latency: number;
+  p99Latency: number;
+  totalDowntimeSeconds: number;
+}
+
+export interface TimeseriesPoint {
+  timestamp: string;
+  checkVolume: number;
+  avgLatency: number;
+  p95Latency: number;
+  uptime: number;
+  errorRate: number;
+}
+
+export interface StatusDistribution {
+  statusCode: number;
+  count: number;
+}
+
+export interface AnalyticsData {
+  metrics: AnalyticsMetrics;
+  timeseries: TimeseriesPoint[];
+  statusDistribution: StatusDistribution[];
+  meta: {
+    startDate: string;
+    endDate: string;
+    bucketInterval: string;
+  };
+}

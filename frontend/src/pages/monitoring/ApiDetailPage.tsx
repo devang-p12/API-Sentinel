@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ApiAnalyticsTab } from '@/components/analytics/ApiAnalyticsTab';
 
 export const ApiDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -119,140 +121,152 @@ export const ApiDetailPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Stats Row */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardContent className="p-5 flex items-center gap-4">
-              <div className="p-3 bg-emerald-500/10 text-emerald-500 rounded-lg"><ActivitySquare className="h-5 w-5" /></div>
-              <div>
-                <p className="text-sm text-muted-foreground">Uptime (24h)</p>
-                <p className="text-2xl font-semibold">{uptime}%</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-5 flex items-center gap-4">
-              <div className="p-3 bg-blue-500/10 text-blue-500 rounded-lg"><Clock3 className="h-5 w-5" /></div>
-              <div>
-                <p className="text-sm text-muted-foreground">Avg Latency (24h)</p>
-                <p className="text-2xl font-semibold">{avgLatency}ms</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-5 flex items-center gap-4">
-              <div className="p-3 bg-rose-500/10 text-rose-500 rounded-lg"><AlertTriangle className="h-5 w-5" /></div>
-              <div>
-                <p className="text-sm text-muted-foreground">Error Rate (24h)</p>
-                <p className="text-2xl font-semibold">{errorRate}%</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-5 flex items-center gap-4">
-              <div className="p-3 bg-slate-500/10 text-slate-500 rounded-lg"><Settings className="h-5 w-5" /></div>
-              <div>
-                <p className="text-sm text-muted-foreground">Check Interval</p>
-                <p className="text-2xl font-semibold">{api.monitoringInterval || 60}s</p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        <Tabs defaultValue="overview" className="w-full">
+          <TabsList className="mb-4">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="analytics">Historical Analytics</TabsTrigger>
+          </TabsList>
+          
+          <TabsContent value="overview" className="space-y-6 mt-0">
+            {/* Stats Row */}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <Card>
+                <CardContent className="p-5 flex items-center gap-4">
+                  <div className="p-3 bg-emerald-500/10 text-emerald-500 rounded-lg"><ActivitySquare className="h-5 w-5" /></div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Uptime (24h)</p>
+                    <p className="text-2xl font-semibold">{uptime}%</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5 flex items-center gap-4">
+                  <div className="p-3 bg-blue-500/10 text-blue-500 rounded-lg"><Clock3 className="h-5 w-5" /></div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Avg Latency (24h)</p>
+                    <p className="text-2xl font-semibold">{avgLatency}ms</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5 flex items-center gap-4">
+                  <div className="p-3 bg-rose-500/10 text-rose-500 rounded-lg"><AlertTriangle className="h-5 w-5" /></div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Error Rate (24h)</p>
+                    <p className="text-2xl font-semibold">{errorRate}%</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5 flex items-center gap-4">
+                  <div className="p-3 bg-slate-500/10 text-slate-500 rounded-lg"><Settings className="h-5 w-5" /></div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Check Interval</p>
+                    <p className="text-2xl font-semibold">{api.monitoringInterval || 60}s</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
 
-        <div className="grid gap-6 lg:grid-cols-3">
-          {/* Main Content: Recent Logs */}
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle>Recent Checks</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {/* Visual Timeline (mini chart) */}
-              <div className="flex items-end gap-1 mb-6 h-24 border-b border-l px-2 pb-0 pt-4">
-                {logs.slice().reverse().map((log: any, i: number) => {
-                  const height = Math.min(100, Math.max(10, (log.response_time / (api.timeout || 5000)) * 100));
-                  return (
-                    <div key={i} className="group relative flex flex-1 items-end justify-center">
-                      <div
-                        className={`w-full rounded-t-sm transition-colors ${log.success ? (log.response_time > (api.degradedThresholdMs || 1000) ? 'bg-amber-500/80' : 'bg-emerald-500/80') : 'bg-rose-500/80'}`}
-                        style={{ height: `${height}%` }}
-                        title={`${log.response_time}ms - ${new Date(log.timestamp).toLocaleTimeString()}`}
-                      />
+            <div className="grid gap-6 lg:grid-cols-3">
+              {/* Main Content: Recent Logs */}
+              <Card className="lg:col-span-2">
+                <CardHeader>
+                  <CardTitle>Recent Checks</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {/* Visual Timeline (mini chart) */}
+                  <div className="flex items-end gap-1 mb-6 h-24 border-b border-l px-2 pb-0 pt-4">
+                    {logs.slice().reverse().map((log: any, i: number) => {
+                      const height = Math.min(100, Math.max(10, (log.response_time / (api.timeout || 5000)) * 100));
+                      return (
+                        <div key={i} className="group relative flex flex-1 items-end justify-center">
+                          <div
+                            className={`w-full rounded-t-sm transition-colors ${log.success ? (log.response_time > (api.degradedThresholdMs || 1000) ? 'bg-amber-500/80' : 'bg-emerald-500/80') : 'bg-rose-500/80'}`}
+                            style={{ height: `${height}%` }}
+                            title={`${log.response_time}ms - ${new Date(log.timestamp).toLocaleTimeString()}`}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Time</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Response Time</TableHead>
+                          <TableHead>Error</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {logs.slice(0, 10).map((log: any) => (
+                          <TableRow key={log.id}>
+                            <TableCell className="text-xs text-muted-foreground">{new Date(log.timestamp).toLocaleString()}</TableCell>
+                            <TableCell>
+                              {log.success ? (
+                                <Badge variant="outline" className="text-emerald-500 border-emerald-500/20 bg-emerald-500/10 text-[10px]">
+                                  {log.status_code || 'OK'}
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-rose-500 border-rose-500/20 bg-rose-500/10 text-[10px]">
+                                  {log.status_code || 'ERR'}
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <span className={`font-mono text-xs ${log.response_time > (api.degradedThresholdMs || 1000) ? 'text-amber-500' : ''}`}>
+                                {log.response_time}ms
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-xs text-rose-500 max-w-[200px] truncate" title={log.error_message || ''}>
+                              {log.error_type || '-'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Right Sidebar: Recent Failures */}
+              <Card className="lg:col-span-1">
+                <CardHeader>
+                  <CardTitle className="text-rose-500 flex items-center gap-2">
+                    <XCircle className="h-5 w-5" /> Recent Failures
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {details?.recentFailures?.length > 0 ? (
+                    <div className="space-y-4">
+                      {details.recentFailures.map((failure: any) => (
+                        <div key={failure.id} className="text-sm p-3 border border-rose-500/20 bg-rose-500/5 rounded-md">
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="font-semibold text-rose-500">{failure.error_type}</span>
+                            <span className="text-xs text-muted-foreground">{new Date(failure.timestamp).toLocaleTimeString()}</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground line-clamp-2">{failure.error_message}</p>
+                        </div>
+                      ))}
                     </div>
-                  );
-                })}
-              </div>
-
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Time</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Response Time</TableHead>
-                      <TableHead>Error</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {logs.slice(0, 10).map((log: any) => (
-                      <TableRow key={log.id}>
-                        <TableCell className="text-xs text-muted-foreground">{new Date(log.timestamp).toLocaleString()}</TableCell>
-                        <TableCell>
-                          {log.success ? (
-                            <Badge variant="outline" className="text-emerald-500 border-emerald-500/20 bg-emerald-500/10 text-[10px]">
-                              {log.status_code || 'OK'}
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-rose-500 border-rose-500/20 bg-rose-500/10 text-[10px]">
-                              {log.status_code || 'ERR'}
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <span className={`font-mono text-xs ${log.response_time > (api.degradedThresholdMs || 1000) ? 'text-amber-500' : ''}`}>
-                            {log.response_time}ms
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-xs text-rose-500 max-w-[200px] truncate" title={log.error_message || ''}>
-                          {log.error_type || '-'}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Right Sidebar: Recent Failures */}
-          <Card className="lg:col-span-1">
-            <CardHeader>
-              <CardTitle className="text-rose-500 flex items-center gap-2">
-                <XCircle className="h-5 w-5" /> Recent Failures
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {details?.recentFailures?.length > 0 ? (
-                <div className="space-y-4">
-                  {details.recentFailures.map((failure: any) => (
-                    <div key={failure.id} className="text-sm p-3 border border-rose-500/20 bg-rose-500/5 rounded-md">
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="font-semibold text-rose-500">{failure.error_type}</span>
-                        <span className="text-xs text-muted-foreground">{new Date(failure.timestamp).toLocaleTimeString()}</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground line-clamp-2">{failure.error_message}</p>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
+                      <CheckCircle2 className="h-8 w-8 text-emerald-500/50 mb-2" />
+                      <p className="text-sm">No recent failures</p>
+                      <p className="text-xs">API has been stable.</p>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
-                  <CheckCircle2 className="h-8 w-8 text-emerald-500/50 mb-2" />
-                  <p className="text-sm">No recent failures</p>
-                  <p className="text-xs">API has been stable.</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+          <TabsContent value="analytics" className="mt-0">
+            <ApiAnalyticsTab apiId={api.id} />
+          </TabsContent>
+        </Tabs>
         
       </div>
     </div>
