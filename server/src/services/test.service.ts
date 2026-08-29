@@ -98,7 +98,7 @@ export class TestService {
     // Stringify the response data to estimate size, or use content-length if available
     let sizeBytes = 0;
     if (response.headers['content-length']) {
-      sizeBytes = parseInt(response.headers['content-length'], 10);
+      sizeBytes = parseInt(String(response.headers['content-length']), 10);
     } else {
       sizeBytes = Buffer.byteLength(typeof response.data === 'string' ? response.data : JSON.stringify(response.data || ''));
     }

@@ -1,7 +1,9 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { errorHandler } from './middleware/error.middleware';
 import testRoutes from './routes/test.routes';
+import apiRoutes from './routes/api.routes';
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -10,7 +12,9 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 app.use(cors({ origin: FRONTEND_URL }));
 app.use(express.json());
 
-// Routes
+// Database Health Check & API Routes
+app.use('/', apiRoutes);
+app.use('/api', apiRoutes);
 app.use('/api/tests', testRoutes);
 
 // Health check
