@@ -30,7 +30,7 @@ const NAV = [
     icon: FlaskConical,
     items: [
       { label: 'On-Demand',      to: '/testing/on-demand',     icon: Zap },
-      { label: 'Load Tests',     to: '/testing/load-tests',    icon: BarChart3 },
+      { label: 'Load Testing',   to: '/testing/load-tests',    icon: BarChart3 },
       { label: 'Schema Changes', to: '/testing/schema-changes', icon: GitCompare },
     ],
   },

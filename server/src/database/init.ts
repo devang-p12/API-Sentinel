@@ -107,7 +107,74 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_apis_created_at ON apis(created_at DESC);
     `);
 
-    // 6. Seeds
+    // 6. Ensure load_test_runs table exists
+    await appClient.query(`
+      CREATE TABLE IF NOT EXISTS load_test_runs (
+        id SERIAL PRIMARY KEY,
+        api_id INT REFERENCES apis(id) ON DELETE CASCADE,
+        batch_id VARCHAR(100),
+        status VARCHAR(50) NOT NULL DEFAULT 'pending',
+        trigger_type VARCHAR(50) NOT NULL DEFAULT 'manual',
+        virtual_users INT NOT NULL,
+        duration VARCHAR(50) NOT NULL,
+        started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP WITH TIME ZONE,
+        total_requests INT DEFAULT 0,
+        successful_requests INT DEFAULT 0,
+        failed_requests INT DEFAULT 0,
+        error_rate NUMERIC(6, 2) DEFAULT 0,
+        throughput NUMERIC(10, 2) DEFAULT 0,
+        avg_latency NUMERIC(10, 2) DEFAULT 0,
+        min_latency NUMERIC(10, 2) DEFAULT 0,
+        max_latency NUMERIC(10, 2) DEFAULT 0,
+        p50_latency NUMERIC(10, 2) DEFAULT 0,
+        p90_latency NUMERIC(10, 2) DEFAULT 0,
+        p95_latency NUMERIC(10, 2) DEFAULT 0,
+        p99_latency NUMERIC(10, 2) DEFAULT 0,
+        status_codes JSONB DEFAULT '{}'::jsonb,
+        error_message TEXT,
+        raw_metrics JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 7. Ensure columns exist on load_test_runs if table was already created
+    await appClient.query(`
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS api_id INT REFERENCES apis(id) ON DELETE CASCADE;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS batch_id VARCHAR(100);
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'pending';
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS trigger_type VARCHAR(50) DEFAULT 'manual';
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS virtual_users INT DEFAULT 1;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS duration VARCHAR(50) DEFAULT '10s';
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS total_requests INT DEFAULT 0;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS successful_requests INT DEFAULT 0;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS failed_requests INT DEFAULT 0;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS error_rate NUMERIC(6, 2) DEFAULT 0;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS throughput NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS avg_latency NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS min_latency NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS max_latency NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS p50_latency NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS p90_latency NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS p95_latency NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS p99_latency NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS status_codes JSONB DEFAULT '{}'::jsonb;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS error_message TEXT;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS raw_metrics JSONB DEFAULT '{}'::jsonb;
+      ALTER TABLE load_test_runs ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+    `);
+
+    // 8. Create Load Test Indexes
+    await appClient.query(`
+      CREATE INDEX IF NOT EXISTS idx_load_test_runs_api_id ON load_test_runs(api_id);
+      CREATE INDEX IF NOT EXISTS idx_load_test_runs_batch_id ON load_test_runs(batch_id);
+      CREATE INDEX IF NOT EXISTS idx_load_test_runs_status ON load_test_runs(status);
+      CREATE INDEX IF NOT EXISTS idx_load_test_runs_created_at ON load_test_runs(created_at DESC);
+    `);
+
+    // 9. Seeds
     await appClient.query(`
       INSERT INTO environments (name, description)
       VALUES 
