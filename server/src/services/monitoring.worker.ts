@@ -109,7 +109,7 @@ export class MonitoringWorker {
       });
 
       statusCode = response.status;
-      responseSize = response.headers['content-length'] ? parseInt(response.headers['content-length'], 10) : (response.data ? JSON.stringify(response.data).length : null);
+      responseSize = response.headers['content-length'] ? parseInt(String(response.headers['content-length']), 10) : (response.data ? JSON.stringify(response.data).length : null);
       
       const expectedStatus = api.expectedStatus || 200;
       if (statusCode === expectedStatus || (statusCode >= 200 && statusCode < 300 && expectedStatus === 200)) {
