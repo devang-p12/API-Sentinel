@@ -1,13 +1,16 @@
 import axios, { AxiosError } from 'axios';
 import { MonitoringRepository, CreateMonitoringLogDTO, UpdateApiMonitoringStatusDTO } from '../repositories/monitoring.repository';
+import { AlertEvaluatorService } from './alert-evaluator.service';
 
 export class MonitoringWorker {
   private repository: MonitoringRepository;
+  private alertEvaluator: AlertEvaluatorService;
   private timer: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
   
   constructor() {
     this.repository = new MonitoringRepository();
+    this.alertEvaluator = new AlertEvaluatorService();
   }
 
   start(intervalMs: number = 10000) {
@@ -173,5 +176,21 @@ export class MonitoringWorker {
       healthStatus,
       consecutiveFailures
     });
+
+    try {
+      await this.alertEvaluator.evaluateApi({
+        apiId: api.id,
+        environment: api.environment,
+        statusCode,
+        responseTime,
+        success,
+        consecutiveFailures,
+      });
+    } catch (evalError) {
+      console.error(
+        `[AlertEvaluator] Evaluation failed for API ${api.id}:`,
+        evalError
+      );
+    }
   }
 }
