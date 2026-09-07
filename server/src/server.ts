@@ -7,6 +7,7 @@ import apiRoutes from './routes/api.routes';
 import loadTestRoutes from './routes/load-test.routes';
 import monitoringRoutes from './routes/monitoring.routes';
 import analyticsRoutes from './routes/analytics.routes';
+import alertRulesRoutes from './routes/alert-rules.routes';
 import { schedulerService } from './controllers/load-test.controller';
 import { MonitoringWorker } from './services/monitoring.worker';
 
@@ -25,6 +26,7 @@ app.use('/api/tests', testRoutes);
 app.use('/api/load-tests', loadTestRoutes);
 app.use('/api/monitoring', monitoringRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/alert-rules', alertRulesRoutes);
 app.use('/load-tests', loadTestRoutes);
 
 // Health check
