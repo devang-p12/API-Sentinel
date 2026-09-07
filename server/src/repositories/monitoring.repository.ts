@@ -106,6 +106,7 @@ export class MonitoringRepository {
       SELECT 
         id,
         name,
+        environment,
         base_url AS "baseUrl",
         headers,
         authentication,
