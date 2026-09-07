@@ -207,7 +207,72 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_load_test_runs_created_at ON load_test_runs(created_at DESC);
     `);
 
-    // 9. Seeds
+    // 9. Ensure alert_rules table exists
+    await appClient.query(`
+      CREATE TABLE IF NOT EXISTS alert_rules (
+        id SERIAL PRIMARY KEY,
+        api_id INT NOT NULL REFERENCES apis(id) ON DELETE CASCADE,
+        environment VARCHAR(50) NOT NULL,
+        metric VARCHAR(50) NOT NULL,
+        operator VARCHAR(50) NOT NULL,
+        threshold NUMERIC NOT NULL,
+        evaluation_window_mins INT DEFAULT 0,
+        consecutive_failures_count INT DEFAULT 1,
+        severity VARCHAR(20) NOT NULL,
+        cooldown_mins INT DEFAULT 5,
+        last_triggered_at TIMESTAMP WITH TIME ZONE,
+        is_enabled BOOLEAN DEFAULT true,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_alert_rules_api_id ON alert_rules(api_id);
+      CREATE INDEX IF NOT EXISTS idx_alert_rules_environment ON alert_rules(environment);
+      CREATE INDEX IF NOT EXISTS idx_alert_rules_is_enabled ON alert_rules(is_enabled);
+    `);
+
+    // 10. Ensure incidents table exists
+    await appClient.query(`
+      CREATE TABLE IF NOT EXISTS incidents (
+        id SERIAL PRIMARY KEY,
+        api_id INT NOT NULL REFERENCES apis(id) ON DELETE CASCADE,
+        rule_id INT NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
+        environment VARCHAR(50) NOT NULL,
+        severity VARCHAR(20) NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'OPEN',
+        trigger_details TEXT,
+        started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        resolved_at TIMESTAMP WITH TIME ZONE,
+        failed_checks_count INT DEFAULT 1,
+        error_info TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_incidents_api_id ON incidents(api_id);
+      CREATE INDEX IF NOT EXISTS idx_incidents_rule_id ON incidents(rule_id);
+      CREATE INDEX IF NOT EXISTS idx_incidents_environment ON incidents(environment);
+      CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
+      CREATE INDEX IF NOT EXISTS idx_incidents_started_at ON incidents(started_at);
+      CREATE INDEX IF NOT EXISTS idx_incidents_resolved_at ON incidents(resolved_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_incidents_unique_open ON incidents(api_id, rule_id, environment) WHERE status = 'OPEN';
+    `);
+
+    // 11. Ensure incident_timeline table exists
+    await appClient.query(`
+      CREATE TABLE IF NOT EXISTS incident_timeline (
+        id SERIAL PRIMARY KEY,
+        incident_id INT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+        event_type VARCHAR(50) NOT NULL,
+        description TEXT,
+        timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_incident_timeline_incident_id ON incident_timeline(incident_id);
+      CREATE INDEX IF NOT EXISTS idx_incident_timeline_timestamp ON incident_timeline(timestamp);
+    `);
+
+    // 12. Seeds
     await appClient.query(`
       INSERT INTO environments (name, description)
       VALUES 
