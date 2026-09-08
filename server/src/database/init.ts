@@ -272,7 +272,48 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_incident_timeline_timestamp ON incident_timeline(timestamp);
     `);
 
-    // 12. Seeds
+    // 12. Ensure api_schemas table exists
+    await appClient.query(`
+      CREATE TABLE IF NOT EXISTS api_schemas (
+        id SERIAL PRIMARY KEY,
+        api_id INT REFERENCES apis(id) ON DELETE CASCADE,
+        environment VARCHAR(50) NOT NULL,
+        version INT NOT NULL DEFAULT 1,
+        is_baseline BOOLEAN DEFAULT false,
+        schema_definition JSONB NOT NULL,
+        sample_response JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_api_schemas_api_id_env ON api_schemas(api_id, environment);
+      CREATE INDEX IF NOT EXISTS idx_api_schemas_api_id_env_version ON api_schemas(api_id, environment, version);
+      CREATE INDEX IF NOT EXISTS idx_api_schemas_created_at ON api_schemas(created_at DESC);
+    `);
+
+    // 13. Ensure api_schema_changes table exists
+    await appClient.query(`
+      CREATE TABLE IF NOT EXISTS api_schema_changes (
+        id SERIAL PRIMARY KEY,
+        api_id INT REFERENCES apis(id) ON DELETE CASCADE,
+        environment VARCHAR(50) NOT NULL,
+        detected_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        previous_schema JSONB NOT NULL,
+        new_schema JSONB NOT NULL,
+        added_fields JSONB DEFAULT '[]'::jsonb,
+        removed_fields JSONB DEFAULT '[]'::jsonb,
+        changed_field_types JSONB DEFAULT '[]'::jsonb,
+        severity VARCHAR(20) NOT NULL DEFAULT 'WARNING',
+        status_code INT DEFAULT 200,
+        is_acknowledged BOOLEAN DEFAULT false
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_api_schema_changes_api_id_env ON api_schema_changes(api_id, environment);
+      CREATE INDEX IF NOT EXISTS idx_api_schema_changes_detected_at ON api_schema_changes(detected_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_api_schema_changes_api_id_env_detected_at ON api_schema_changes(api_id, environment, detected_at DESC);
+    `);
+
+    // 14. Seeds
     await appClient.query(`
       INSERT INTO environments (name, description)
       VALUES 
