@@ -5,8 +5,10 @@ import {
   Activity, ArrowDownRight, ArrowUpRight,
   CheckCircle2, Clock3, ExternalLink, MoreVertical,
   Plus, RefreshCw, Server, TrendingUp, XCircle, Trash2,
-  AlertTriangle, Filter, Search
+  AlertTriangle, Filter, Search,
+  ShieldAlert, AlertOctagon, Layers
 } from 'lucide-react';
+import { fetchIncidents } from '@/services/incidents.service';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -53,13 +55,17 @@ export function EnvBadge({ env }: { env: string }) {
 
 // ─── Metric Card ──────────────────────────────────────────────────────────────
 function MetricCard({
-  title, value, description, icon: Icon, trend, trendUp,
+  title, value, description, icon: Icon, trend, trendUp, onClick,
 }: {
   title: string; value: string; description: string;
   icon: React.ElementType; trend?: string; trendUp?: boolean;
+  onClick?: () => void;
 }) {
   return (
-    <Card>
+    <Card
+      className={onClick ? "cursor-pointer hover:bg-muted/30 transition-colors" : undefined}
+      onClick={onClick}
+    >
       <CardContent className="p-5">
         <div className="flex items-start justify-between">
           <div>
@@ -91,6 +97,11 @@ export const DashboardPage: React.FC = () => {
   
   const [stats, setStats] = useState<any>(null);
   const [healthList, setHealthList] = useState<any[]>([]);
+  const [incidentMetrics, setIncidentMetrics] = useState({
+    active: 0,
+    critical: 0,
+    affectedApis: 0,
+  });
   const [loading, setLoading] = useState(true);
   
   const [envFilter, setEnvFilter] = useState('all');
@@ -100,14 +111,33 @@ export const DashboardPage: React.FC = () => {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const [statsRes, listRes] = await Promise.all([
+      const [statsRes, listRes, incidentsResult] = await Promise.all([
         fetch('/api/monitoring/dashboard/stats'),
-        fetch(`/api/monitoring/health?environment=${envFilter}&status=${statusFilter}`)
+        fetch(`/api/monitoring/health?environment=${envFilter}&status=${statusFilter}`),
+        fetchIncidents({ environment: envFilter !== 'all' ? envFilter : undefined }).catch((err) => {
+          console.warn('Failed to fetch incidents for dashboard KPIs:', err);
+          return { incidents: [], total: 0 };
+        }),
       ]);
       
       if (statsRes.ok && listRes.ok) {
         setStats(await statsRes.json());
         setHealthList(await listRes.json());
+      }
+
+      if (incidentsResult && Array.isArray(incidentsResult.incidents)) {
+        const activeList = incidentsResult.incidents.filter(
+          (i) => i.status === 'OPEN' || i.status === 'ACKNOWLEDGED'
+        );
+        const activeCount = activeList.length;
+        const criticalCount = activeList.filter((i) => i.severity === 'CRITICAL').length;
+        const uniqueApis = new Set(activeList.map((i) => i.apiId)).size;
+
+        setIncidentMetrics({
+          active: activeCount,
+          critical: criticalCount,
+          affectedApis: uniqueApis,
+        });
       }
     } catch (err) {
       console.error('Failed to fetch dashboard data', err);
@@ -171,6 +201,46 @@ export const DashboardPage: React.FC = () => {
           <MetricCard title="Healthy APIs" value={String(healthy)} description={`${healthPct}% of total`} icon={CheckCircle2} />
           <MetricCard title="Degraded / Down" value={`${degraded} / ${down}`} description="APIs needing attention" icon={AlertTriangle} />
           <MetricCard title="24h Availability" value={`${overallAvailability}%`} description="overall success rate" icon={TrendingUp} trendUp={parseFloat(overallAvailability) > 99} />
+        </div>
+
+        {/* Incident Overview */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold tracking-tight uppercase text-muted-foreground">
+              Incident Overview
+            </h2>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => navigate('/insights/alerts')}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              View All Incidents →
+            </Button>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <MetricCard
+              title="Active Incidents"
+              value={String(incidentMetrics.active)}
+              description={incidentMetrics.active > 0 ? "Requiring triage or resolution" : "No open or acknowledged incidents"}
+              icon={ShieldAlert}
+              onClick={() => navigate('/insights/alerts')}
+            />
+            <MetricCard
+              title="Critical Incidents"
+              value={String(incidentMetrics.critical)}
+              description={incidentMetrics.critical > 0 ? "High-priority severity alerts" : "No critical breaches"}
+              icon={AlertOctagon}
+              onClick={() => navigate('/insights/alerts')}
+            />
+            <MetricCard
+              title="Affected APIs"
+              value={String(incidentMetrics.affectedApis)}
+              description={total > 0 ? `out of ${total} registered APIs` : "No APIs currently impacted"}
+              icon={Layers}
+              onClick={() => navigate('/insights/alerts')}
+            />
+          </div>
         </div>
 
         {/* API Status Table */}
