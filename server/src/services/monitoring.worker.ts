@@ -2,11 +2,13 @@ import axios, { AxiosError } from 'axios';
 import { MonitoringRepository, CreateMonitoringLogDTO, UpdateApiMonitoringStatusDTO } from '../repositories/monitoring.repository';
 import { AlertEvaluatorService } from './alert-evaluator.service';
 import { NotificationService } from './notification.service';
+import { SchemaDetectionService } from './schema-detection.service';
 
 export class MonitoringWorker {
   private repository: MonitoringRepository;
   private alertEvaluator: AlertEvaluatorService;
   private notificationService: NotificationService;
+  private schemaDetectionService: SchemaDetectionService;
   private timer: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
   
@@ -14,6 +16,7 @@ export class MonitoringWorker {
     this.repository = new MonitoringRepository();
     this.alertEvaluator = new AlertEvaluatorService();
     this.notificationService = new NotificationService();
+    this.schemaDetectionService = new SchemaDetectionService();
   }
 
   start(intervalMs: number = 10000) {
@@ -97,6 +100,7 @@ export class MonitoringWorker {
     let errorType: string | null = null;
     let errorMessage: string | null = null;
     let responseSize: number | null = null;
+    let responseData: any = null;
 
     try {
       const headers = this.resolveHeadersAndAuth(api);
@@ -112,6 +116,7 @@ export class MonitoringWorker {
       });
 
       statusCode = response.status;
+      responseData = response.data;
       responseSize = response.headers['content-length'] ? parseInt(String(response.headers['content-length']), 10) : (response.data ? JSON.stringify(response.data).length : null);
       
       const expectedStatus = api.expectedStatus || 200;
@@ -198,6 +203,33 @@ export class MonitoringWorker {
         `[AlertEvaluator] Evaluation failed for API ${api.id}:`,
         evalError
       );
+    }
+
+    // Response Schema Detection (isolated so errors never impact monitoring status)
+    if (responseData !== null && responseData !== undefined && statusCode !== null) {
+      try {
+        const schemaResult = await this.schemaDetectionService.detectSchemaChange(
+          api.id,
+          api.environment,
+          responseData,
+          statusCode
+        );
+
+        if (schemaResult.status === 'BASELINE_CREATED') {
+          console.log(
+            `[SchemaDetection] Baseline created for API ${api.id} (${api.environment}): version ${schemaResult.version}`
+          );
+        } else if (schemaResult.status === 'CHANGED') {
+          console.log(
+            `[SchemaDetection] Schema change detected for API ${api.id} (${api.environment}): version ${schemaResult.version}, severity: ${schemaResult.diff?.severity || 'WARNING'}`
+          );
+        }
+      } catch (schemaError) {
+        console.error(
+          `[SchemaDetection] Detection failed for API ${api.id} (${api.environment}):`,
+          schemaError
+        );
+      }
     }
   }
 }
