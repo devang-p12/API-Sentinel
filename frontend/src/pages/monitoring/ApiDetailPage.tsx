@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApi } from '@/context/ApiContext';
 import {
-  Activity, ArrowLeft, Globe, Server, CheckCircle2,
+  ArrowLeft, Globe, Server, CheckCircle2,
   XCircle, Clock3, AlertTriangle, Play, Pause, Settings,
   ActivitySquare
 } from 'lucide-react';
@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ApiAnalyticsTab } from '@/components/analytics/ApiAnalyticsTab';
+import { ResponseChanges } from '@/components/monitoring/ResponseChanges';
 
 export const ApiDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -125,6 +126,7 @@ export const ApiDetailPage: React.FC = () => {
           <TabsList className="mb-4">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="analytics">Historical Analytics</TabsTrigger>
+            <TabsTrigger value="response-changes">Response Changes</TabsTrigger>
           </TabsList>
           
           <TabsContent value="overview" className="space-y-6 mt-0">
@@ -265,6 +267,9 @@ export const ApiDetailPage: React.FC = () => {
           </TabsContent>
           <TabsContent value="analytics" className="mt-0">
             <ApiAnalyticsTab apiId={api.id} />
+          </TabsContent>
+          <TabsContent value="response-changes" className="mt-0">
+            <ResponseChanges apiId={api.id} environment={api.environment} />
           </TabsContent>
         </Tabs>
         
