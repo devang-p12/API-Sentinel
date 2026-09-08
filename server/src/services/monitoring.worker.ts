@@ -219,10 +219,37 @@ export class MonitoringWorker {
           console.log(
             `[SchemaDetection] Baseline created for API ${api.id} (${api.environment}): version ${schemaResult.version}`
           );
-        } else if (schemaResult.status === 'CHANGED') {
+        } else if (schemaResult.status === 'CHANGED' && schemaResult.changeEvent) {
           console.log(
             `[SchemaDetection] Schema change detected for API ${api.id} (${api.environment}): version ${schemaResult.version}, severity: ${schemaResult.diff?.severity || 'WARNING'}`
           );
+
+          // Evaluate SCHEMA_CHANGE alert rules if a schema change occurred
+          try {
+            const schemaAlertReport = await this.alertEvaluator.evaluateSchemaChangeRules({
+              apiId: api.id,
+              environment: api.environment,
+              changeEvent: schemaResult.changeEvent,
+              previousVersion: schemaResult.version > 1 ? schemaResult.version - 1 : 1,
+              newVersion: schemaResult.version,
+            });
+
+            if (schemaAlertReport && schemaAlertReport.results.length > 0) {
+              this.notificationService
+                .processEvaluatorReport(schemaAlertReport, api.name)
+                .catch((err) =>
+                  console.error(
+                    `[Notification] Dispatch failed for schema change on API ${api.id}:`,
+                    err
+                  )
+                );
+            }
+          } catch (alertError) {
+            console.error(
+              `[AlertEvaluator] Schema change alert evaluation failed for API ${api.id}:`,
+              alertError
+            );
+          }
         }
       } catch (schemaError) {
         console.error(

@@ -54,6 +54,28 @@ interface OpenIncidentRecord {
   id: number;
   failedChecksCount: number;
   startedAt: string | Date;
+  triggerDetails?: string | null;
+}
+
+export interface SchemaChangeAlertContext {
+  apiId: number;
+  environment: string;
+  changeEvent: {
+    id: number;
+    apiId: number;
+    environment: string;
+    detectedAt: Date | string;
+    previousSchema: any;
+    newSchema: any;
+    addedFields: string[];
+    removedFields: string[];
+    changedFieldTypes: any[];
+    severity: string;
+    statusCode: number;
+    isAcknowledged: boolean;
+  };
+  previousVersion?: number;
+  newVersion?: number;
 }
 
 interface StreakEvaluation {
@@ -106,10 +128,242 @@ export class AlertEvaluatorService {
       WHERE api_id = $1
         AND LOWER(environment) = LOWER($2)
         AND is_enabled = true
+        AND metric != 'SCHEMA_CHANGE'
       ORDER BY id ASC
     `;
     const result = await query(text, [apiId, environment]);
     return result.rows;
+  }
+
+  /**
+   * Fetch active SCHEMA_CHANGE rules for the given API and environment.
+   */
+  private async getActiveSchemaRules(apiId: number, environment: string): Promise<AlertRuleRecord[]> {
+    const text = `
+      SELECT
+        id,
+        api_id AS "apiId",
+        environment,
+        metric,
+        operator,
+        threshold,
+        evaluation_window_mins AS "evaluationWindowMins",
+        consecutive_failures_count AS "consecutiveFailuresCount",
+        severity,
+        cooldown_mins AS "cooldownMins",
+        last_triggered_at AS "lastTriggeredAt",
+        is_enabled AS "isEnabled"
+      FROM alert_rules
+      WHERE api_id = $1
+        AND LOWER(environment) = LOWER($2)
+        AND is_enabled = true
+        AND metric = 'SCHEMA_CHANGE'
+      ORDER BY id ASC
+    `;
+    const result = await query(text, [apiId, environment]);
+    return result.rows;
+  }
+
+  /**
+   * Evaluates SCHEMA_CHANGE alert rules when a new schema change event is detected.
+   */
+  async evaluateSchemaChangeRules(context: SchemaChangeAlertContext): Promise<EvaluatorReport> {
+    const rules = await this.getActiveSchemaRules(context.apiId, context.environment);
+    const results: RuleEvaluationResult[] = [];
+
+    if (!rules || rules.length === 0) {
+      return {
+        apiId: context.apiId,
+        environment: context.environment,
+        evaluatedAt: new Date(),
+        rulesEvaluated: 0,
+        results: [],
+      };
+    }
+
+    const { changeEvent } = context;
+    const addedCount = Array.isArray(changeEvent.addedFields) ? changeEvent.addedFields.length : 0;
+    const removedCount = Array.isArray(changeEvent.removedFields) ? changeEvent.removedFields.length : 0;
+    const changedTypesCount = Array.isArray(changeEvent.changedFieldTypes) ? changeEvent.changedFieldTypes.length : 0;
+    const totalDifferences = addedCount + removedCount + changedTypesCount;
+
+    for (const rule of rules) {
+      const threshold = Number(rule.threshold);
+      const conditionMet = this.evaluateComparison(totalDifferences, rule.operator, threshold);
+
+      // Check for existing OPEN incident for (apiId, rule.id, environment)
+      const openIncident = await this.findOpenIncident(rule.apiId, rule.id, rule.environment);
+      const existingOpenIncident = openIncident !== null;
+
+      // Deduplication: prevent re-triggering for the same persisted change event
+      if (existingOpenIncident && openIncident?.triggerDetails) {
+        const alreadyRecorded = this.isSchemaChangeAlreadyRecorded(
+          openIncident.triggerDetails,
+          changeEvent.id
+        );
+        if (alreadyRecorded) {
+          results.push({
+            ruleId: rule.id,
+            metric: rule.metric,
+            conditionMet,
+            streakMet: conditionMet,
+            inCooldown: false,
+            existingOpenIncident: true,
+            action: 'NO_ACTION',
+            incidentId: openIncident.id,
+            details: `Schema change #${changeEvent.id} already evaluated on open incident #${openIncident.id}`,
+          });
+          continue;
+        }
+      }
+
+      if (!conditionMet) {
+        results.push({
+          ruleId: rule.id,
+          metric: rule.metric,
+          conditionMet: false,
+          streakMet: false,
+          inCooldown: false,
+          existingOpenIncident,
+          action: 'NO_ACTION',
+          incidentId: openIncident ? openIncident.id : undefined,
+          details: `Schema differences (${totalDifferences}) did not meet threshold ${threshold} (${rule.operator})`,
+        });
+        continue;
+      }
+
+      // Condition IS MET: build structured trigger details
+      const triggerDetailsObj = {
+        changeId: changeEvent.id,
+        changeIds: [changeEvent.id],
+        apiId: changeEvent.apiId,
+        environment: changeEvent.environment,
+        statusCode: changeEvent.statusCode,
+        detectedAt: changeEvent.detectedAt,
+        previousVersion: context.previousVersion ?? null,
+        newVersion: context.newVersion ?? null,
+        totalChanges: totalDifferences,
+        addedFields: changeEvent.addedFields || [],
+        removedFields: changeEvent.removedFields || [],
+        changedFieldTypes: changeEvent.changedFieldTypes || [],
+      };
+      const triggerDetails = JSON.stringify(triggerDetailsObj);
+
+      // If open incident already exists for this rule on a previous change event: update it
+      if (existingOpenIncident && openIncident) {
+        const updatedTriggerDetails = this.appendSchemaChangeId(
+          openIncident.triggerDetails,
+          changeEvent.id
+        );
+        await this.updateIncidentTriggerDetails(openIncident.id, updatedTriggerDetails);
+        await this.incrementIncidentFailedChecks(openIncident.id);
+        openIncident.triggerDetails = updatedTriggerDetails;
+
+        const timelineText = `
+          INSERT INTO incident_timeline (incident_id, event_type, description, timestamp)
+          VALUES ($1, 'ALERT_TRIGGERED', $2, CURRENT_TIMESTAMP)
+        `;
+        await query(timelineText, [
+          openIncident.id,
+          `Additional schema change #${changeEvent.id} detected: ${totalDifferences} differences in version ${context.newVersion ?? ''}`,
+        ]);
+
+        results.push({
+          ruleId: rule.id,
+          metric: rule.metric,
+          conditionMet: true,
+          streakMet: true,
+          inCooldown: false,
+          existingOpenIncident: true,
+          action: 'INCIDENT_UPDATED',
+          incidentId: openIncident.id,
+          details: `Updated with schema change #${changeEvent.id} (${totalDifferences} differences)`,
+        });
+        continue;
+      }
+
+      // Check cooldown
+      let inCooldown = false;
+      if (rule.lastTriggeredAt) {
+        const lastTriggeredMs = new Date(rule.lastTriggeredAt).getTime();
+        const cooldownMs = (Number(rule.cooldownMins) || 0) * 60 * 1000;
+        if (Date.now() - lastTriggeredMs < cooldownMs) {
+          inCooldown = true;
+        }
+      }
+
+      if (inCooldown) {
+        results.push({
+          ruleId: rule.id,
+          metric: rule.metric,
+          conditionMet: true,
+          streakMet: true,
+          inCooldown: true,
+          existingOpenIncident: false,
+          action: 'SKIPPED_COOLDOWN',
+          details: `Schema change #${changeEvent.id} (${totalDifferences} differences) - Cooldown active: ${rule.cooldownMins}m`,
+        });
+        continue;
+      }
+
+      // Create new incident
+      const newIncidentId = await this.createIncident(rule, triggerDetails);
+      if (newIncidentId) {
+        results.push({
+          ruleId: rule.id,
+          metric: rule.metric,
+          conditionMet: true,
+          streakMet: true,
+          inCooldown: false,
+          existingOpenIncident: false,
+          action: 'INCIDENT_CREATED',
+          incidentId: newIncidentId,
+          details: `Created incident for schema change #${changeEvent.id} (${totalDifferences} differences, rule threshold: ${rule.threshold})`,
+        });
+      } else {
+        const concurrent = await this.findOpenIncident(rule.apiId, rule.id, rule.environment);
+        if (concurrent) {
+          const updatedTriggerDetails = this.appendSchemaChangeId(
+            concurrent.triggerDetails,
+            changeEvent.id
+          );
+          await this.updateIncidentTriggerDetails(concurrent.id, updatedTriggerDetails);
+          await this.incrementIncidentFailedChecks(concurrent.id);
+          concurrent.triggerDetails = updatedTriggerDetails;
+
+          results.push({
+            ruleId: rule.id,
+            metric: rule.metric,
+            conditionMet: true,
+            streakMet: true,
+            inCooldown: false,
+            existingOpenIncident: true,
+            action: 'INCIDENT_UPDATED',
+            incidentId: concurrent.id,
+            details: `Schema change #${changeEvent.id} recorded on concurrent open incident #${concurrent.id}`,
+          });
+        } else {
+          results.push({
+            ruleId: rule.id,
+            metric: rule.metric,
+            conditionMet: true,
+            streakMet: true,
+            inCooldown: false,
+            existingOpenIncident: false,
+            action: 'NO_ACTION',
+            details: `Schema change #${changeEvent.id} (Incident creation conflict)`,
+          });
+        }
+      }
+    }
+
+    return {
+      apiId: context.apiId,
+      environment: context.environment,
+      evaluatedAt: new Date(),
+      rulesEvaluated: rules.length,
+      results,
+    };
   }
 
   /**
@@ -648,7 +902,8 @@ export class AlertEvaluatorService {
       SELECT 
         id,
         failed_checks_count AS "failedChecksCount",
-        started_at AS "startedAt"
+        started_at AS "startedAt",
+        trigger_details AS "triggerDetails"
       FROM incidents
       WHERE api_id = $1 
         AND rule_id = $2 
@@ -671,6 +926,132 @@ export class AlertEvaluatorService {
       WHERE id = $1
     `;
     await query(text, [incidentId]);
+  }
+
+  /**
+   * Update trigger_details on an existing OPEN incident.
+   */
+  private async updateIncidentTriggerDetails(
+    incidentId: number,
+    triggerDetails: string
+  ): Promise<void> {
+    const text = `
+      UPDATE incidents
+      SET trigger_details = $1,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+    `;
+    await query(text, [triggerDetails, incidentId]);
+  }
+
+  /**
+   * Check if a schema change ID has already been recorded on an open incident's trigger_details.
+   * Supports both single changeId and changeIds array representations for backward compatibility.
+   */
+  private isSchemaChangeAlreadyRecorded(
+    triggerDetailsRaw: string | null | undefined,
+    changeId: number
+  ): boolean {
+    if (!triggerDetailsRaw) {
+      return false;
+    }
+
+    try {
+      const parsed =
+        typeof triggerDetailsRaw === 'string'
+          ? JSON.parse(triggerDetailsRaw)
+          : triggerDetailsRaw;
+
+      if (parsed && typeof parsed === 'object') {
+        if (Number(parsed.changeId) === changeId) {
+          return true;
+        }
+        if (Array.isArray(parsed.changeIds)) {
+          if (parsed.changeIds.some((id: any) => Number(id) === changeId)) {
+            return true;
+          }
+        }
+      }
+    } catch {
+      // Fallback below if JSON parsing fails
+    }
+
+    // Fallback regex / substring matching
+    if (
+      triggerDetailsRaw.includes(`"changeId":${changeId}`) ||
+      triggerDetailsRaw.includes(`"changeId": ${changeId}`)
+    ) {
+      return true;
+    }
+
+    const changeIdRegex = new RegExp(`"changeId"\\s*:\\s*${changeId}\\b`);
+    if (changeIdRegex.test(triggerDetailsRaw)) {
+      return true;
+    }
+
+    const changeIdsRegex = new RegExp(
+      `"changeIds"\\s*:\\s*\\[[^\\]]*\\b${changeId}\\b[^\\]]*\\]`
+    );
+    if (changeIdsRegex.test(triggerDetailsRaw)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Append a changeId to the trigger_details structure, preserving existing fields
+   * and maintaining both `changeId` and `changeIds` for backward compatibility.
+   */
+  private appendSchemaChangeId(
+    existingDetailsRaw: string | null | undefined,
+    newChangeId: number
+  ): string {
+    let detailsObj: Record<string, any> = {};
+
+    if (typeof existingDetailsRaw === 'string') {
+      try {
+        detailsObj = JSON.parse(existingDetailsRaw);
+      } catch {
+        detailsObj = { raw: existingDetailsRaw };
+      }
+    } else if (existingDetailsRaw && typeof existingDetailsRaw === 'object') {
+      detailsObj = { ...(existingDetailsRaw as any) };
+    }
+
+    const existingChangeIds: number[] = [];
+
+    // Collect existing changeId if present
+    if (detailsObj.changeId !== undefined && detailsObj.changeId !== null) {
+      const originalId = Number(detailsObj.changeId);
+      if (!isNaN(originalId)) {
+        existingChangeIds.push(originalId);
+      }
+    }
+
+    // Collect existing changeIds array if present
+    if (Array.isArray(detailsObj.changeIds)) {
+      for (const id of detailsObj.changeIds) {
+        const numId = Number(id);
+        if (!isNaN(numId) && !existingChangeIds.includes(numId)) {
+          existingChangeIds.push(numId);
+        }
+      }
+    }
+
+    // Add the new changeId if not already in the list
+    if (!existingChangeIds.includes(newChangeId)) {
+      existingChangeIds.push(newChangeId);
+    }
+
+    // Preserve the original changeId if present, otherwise set to the first recorded ID
+    if (detailsObj.changeId === undefined || detailsObj.changeId === null) {
+      detailsObj.changeId = existingChangeIds[0] ?? newChangeId;
+    }
+
+    detailsObj.changeIds = existingChangeIds;
+
+    return JSON.stringify(detailsObj);
   }
 
   /**

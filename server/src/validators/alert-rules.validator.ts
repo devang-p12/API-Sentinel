@@ -7,6 +7,7 @@ export const SUPPORTED_METRICS = [
   'API_UNAVAILABLE',
   'UPTIME',
   'CONSECUTIVE_FAILURES',
+  'SCHEMA_CHANGE',
 ] as const;
 
 export const SUPPORTED_OPERATORS = [
