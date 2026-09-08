@@ -1,16 +1,19 @@
 import axios, { AxiosError } from 'axios';
 import { MonitoringRepository, CreateMonitoringLogDTO, UpdateApiMonitoringStatusDTO } from '../repositories/monitoring.repository';
 import { AlertEvaluatorService } from './alert-evaluator.service';
+import { NotificationService } from './notification.service';
 
 export class MonitoringWorker {
   private repository: MonitoringRepository;
   private alertEvaluator: AlertEvaluatorService;
+  private notificationService: NotificationService;
   private timer: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
   
   constructor() {
     this.repository = new MonitoringRepository();
     this.alertEvaluator = new AlertEvaluatorService();
+    this.notificationService = new NotificationService();
   }
 
   start(intervalMs: number = 10000) {
@@ -178,7 +181,7 @@ export class MonitoringWorker {
     });
 
     try {
-      await this.alertEvaluator.evaluateApi({
+      const report = await this.alertEvaluator.evaluateApi({
         apiId: api.id,
         environment: api.environment,
         statusCode,
@@ -186,6 +189,10 @@ export class MonitoringWorker {
         success,
         consecutiveFailures,
       });
+
+      // Fire-and-forget: notification failures are fully isolated from monitoring
+      this.notificationService.processEvaluatorReport(report, api.name)
+        .catch(err => console.error(`[Notification] Dispatch failed for API ${api.id}:`, err));
     } catch (evalError) {
       console.error(
         `[AlertEvaluator] Evaluation failed for API ${api.id}:`,
