@@ -1,6 +1,15 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { API, APIStatus } from '../types/api';
 
+export interface ActivityEvent {
+  id: string;
+  type: string;
+  message: string;
+  timestamp: string;
+  apiName?: string;
+  environment?: string;
+}
+
 interface ApiContextType {
   apis: API[];
   addApi: (api: Omit<API, 'id' | 'createdAt' | 'status'>) => void;
@@ -23,6 +32,7 @@ interface ApiContextType {
   setSortBy: (sort: 'name' | 'createdAt' | 'version') => void;
   isRefreshing: boolean;
   refreshApis: () => void;
+  activityFeed: ActivityEvent[];
 }
 
 const ApiContext = createContext<ApiContextType | undefined>(undefined);
@@ -92,6 +102,7 @@ export const ApiProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [envFilter, setEnvFilter] = useState('all');
   const [sortBy, setSortBy] = useState<'name' | 'createdAt' | 'version'>('createdAt');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [activityFeed, setActivityFeed] = useState<ActivityEvent[]>([]);
 
   // Sync theme with HTML class
   useEffect(() => {
@@ -170,6 +181,55 @@ export const ApiProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     localStorage.setItem('api_sentinel_data', JSON.stringify(apis));
   }, [apis]);
+
+  // SSE Connection for Real-Time Events
+  useEffect(() => {
+    const eventSource = new EventSource('/api/events');
+
+    eventSource.onmessage = (e) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (payload.type === 'CONNECTED') return;
+
+        let message = '';
+        if (payload.type === 'API_STATUS_CHANGED') {
+           const { apiName, newStatus, oldStatus } = payload.data;
+           message = `${apiName} became ${newStatus}`;
+           
+           // Update API list
+           setApis(prev => prev.map(api => 
+             api.id === String(payload.data.apiId) ? { ...api, healthStatus: newStatus } : api
+           ));
+        } else if (payload.type === 'INCIDENT_CREATED') {
+           message = `Incident created for ${payload.data.apiName}`;
+        } else if (payload.type === 'INCIDENT_RESOLVED') {
+           message = `Incident resolved for ${payload.data.apiName}`;
+        } else if (payload.type === 'ALERT_TRIGGERED') {
+           message = `Critical alert triggered for ${payload.data.apiName}`;
+        } else if (payload.type === 'SCHEMA_CHANGED') {
+           message = `Schema changed for ${payload.data.apiName} (v${payload.data.version})`;
+        }
+
+        if (message) {
+           setActivityFeed(prev => {
+             const newFeed = [{
+               id: Date.now() + '-' + Math.random(),
+               type: payload.type,
+               message,
+               timestamp: payload.timestamp,
+               apiName: payload.data?.apiName,
+               environment: payload.data?.environment
+             }, ...prev];
+             return newFeed.slice(0, 50); // keep last 50
+           });
+        }
+      } catch (err) {}
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, []);
 
   const toggleTheme = () => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
@@ -269,7 +329,8 @@ export const ApiProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         sortBy,
         setSortBy,
         isRefreshing,
-        refreshApis
+        refreshApis,
+        activityFeed
       }}
     >
       {children}

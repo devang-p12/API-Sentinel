@@ -28,9 +28,24 @@ export const ApiDetails: React.FC = () => {
 
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedAuth, setCopiedAuth] = useState(false);
+  const [reliabilityScore, setReliabilityScore] = useState<any>(null);
 
   // Find selected API
   const api = apis.find(item => item.id === selectedApiId);
+
+  React.useEffect(() => {
+    if (selectedApiId && api) {
+      const numericId = parseInt(api.id, 10);
+      if (!isNaN(numericId)) {
+        fetch(`/api/analytics/${numericId}/reliability`)
+          .then(res => res.json())
+          .then(data => setReliabilityScore(data))
+          .catch(err => console.error(err));
+      } else {
+        setReliabilityScore(null);
+      }
+    }
+  }, [selectedApiId, api]);
 
   if (!selectedApiId) return null;
 
@@ -180,6 +195,47 @@ export const ApiDetails: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Reliability Score */}
+          {reliabilityScore && reliabilityScore.score !== undefined && (
+            <div className="space-y-2">
+              <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">
+                Reliability Score
+              </span>
+              <div className="p-3 rounded-md border bg-transparent border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                    Total Score
+                  </span>
+                  <span className={`text-lg font-bold ${
+                    reliabilityScore.score >= 90 ? 'text-emerald-500' :
+                    reliabilityScore.score >= 70 ? 'text-amber-500' :
+                    'text-rose-500'
+                  }`}>
+                    {reliabilityScore.score}/100
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Availability</span>
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">{reliabilityScore.breakdown?.availability}/40</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Latency</span>
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">{reliabilityScore.breakdown?.latency}/25</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Errors</span>
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">{reliabilityScore.breakdown?.errors}/20</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Incidents</span>
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">{reliabilityScore.breakdown?.incidents}/15</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Continuous Monitoring Settings */}
           <div className="space-y-2">

@@ -4,7 +4,8 @@ export type AlertMetric =
   | 'HTTP_STATUS'
   | 'API_UNAVAILABLE'
   | 'UPTIME'
-  | 'CONSECUTIVE_FAILURES';
+  | 'CONSECUTIVE_FAILURES'
+  | 'SCHEMA_CHANGE';
 
 export type AlertOperator =
   | 'GREATER_THAN'

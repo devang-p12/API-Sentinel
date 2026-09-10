@@ -127,6 +127,7 @@ function formatCondition(
     API_UNAVAILABLE: { label: 'Unavailable', unit: '' },
     UPTIME: { label: 'Uptime', unit: '%' },
     CONSECUTIVE_FAILURES: { label: 'Consecutive Failures', unit: 'checks' },
+    SCHEMA_CHANGE: { label: 'Schema Change', unit: '' },
   };
   const info = metricMap[metric] || { label: metric, unit: '' };
   const unitStr = info.unit ? ` ${info.unit}` : '';

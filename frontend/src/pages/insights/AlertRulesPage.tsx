@@ -67,6 +67,7 @@ const METRICS: { value: AlertMetric; label: string; description: string; unit: s
   { value: 'API_UNAVAILABLE', label: 'API Unavailable', description: 'Complete service downtime', unit: '' },
   { value: 'UPTIME', label: 'Uptime', description: 'Availability percentage', unit: '%' },
   { value: 'CONSECUTIVE_FAILURES', label: 'Consecutive Failures', description: 'Count of back-to-back failures', unit: 'failures' },
+  { value: 'SCHEMA_CHANGE', label: 'Schema Change', description: 'Response schema has changed', unit: 'changes' },
 ];
 
 const OPERATORS: { value: AlertOperator; label: string; symbol: string }[] = [
@@ -336,6 +337,9 @@ export const AlertRulesPage: React.FC = () => {
 
     if (rule.metric === 'API_UNAVAILABLE') {
       return `${op} ${rule.threshold === 1 ? 'Unavailable (1)' : 'Available (0)'}`;
+    }
+    if (rule.metric === 'SCHEMA_CHANGE') {
+      return `${op} ${rule.threshold} Changes`;
     }
     return `${op} ${rule.threshold}${unit}`;
   };
@@ -905,6 +909,7 @@ export const AlertRulesPage: React.FC = () => {
                   {formData.metric === 'UPTIME' && 'Target uptime percentage (e.g. 99).'}
                   {formData.metric === 'CONSECUTIVE_FAILURES' &&
                     'Threshold number of failed checks (e.g. 3).'}
+                  {formData.metric === 'SCHEMA_CHANGE' && 'Number of schema changes detected (e.g. 1).'}
                 </p>
               </div>
 

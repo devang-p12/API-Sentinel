@@ -41,7 +41,8 @@ export const Dashboard: React.FC = () => {
     setSortBy,
     isRefreshing,
     refreshApis,
-    updateApi
+    updateApi,
+    activityFeed
   } = useApi();
 
   // Compute metrics
@@ -178,6 +179,48 @@ export const Dashboard: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Activity Feed Section */}
+      <Card className="border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50 rounded-t-lg">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <Activity size={14} className="text-blue-500" />
+            Live Activity Feed
+          </h3>
+          <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+            Real-time
+          </span>
+        </div>
+        <CardContent className="p-0">
+          <div className="h-40 overflow-y-auto px-4 py-2 space-y-2 custom-scrollbar">
+            {activityFeed && activityFeed.length > 0 ? (
+              activityFeed.map((event) => (
+                <div key={event.id} className="flex items-start gap-3 py-2 border-b border-slate-50 dark:border-slate-800/50 last:border-0">
+                  <div className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${
+                    event.type === 'API_STATUS_CHANGED' ? 'bg-amber-500' :
+                    event.type === 'ALERT_TRIGGERED' ? 'bg-rose-500' :
+                    event.type === 'INCIDENT_RESOLVED' ? 'bg-emerald-500' :
+                    event.type === 'SCHEMA_CHANGED' ? 'bg-purple-500' :
+                    'bg-blue-500'
+                  }`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-slate-800 dark:text-slate-200 font-medium">
+                      {event.message}
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      {new Date(event.timestamp).toLocaleTimeString()} {event.environment ? `• ${event.environment}` : ''}
+                    </p>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="h-full flex items-center justify-center text-xs text-slate-400 italic">
+                No recent activity. Waiting for events...
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Table Controls (Filters, Sorting, Search, Refresh) */}
       <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between p-3 rounded-lg border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 card-shadow">
