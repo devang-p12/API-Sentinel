@@ -1,0 +1,9 @@
+{
+  "name": "sentinel-demo-api",
+  "version": "1.0.0",
+  "description": "Controlled target API for API Sentinel verification",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
