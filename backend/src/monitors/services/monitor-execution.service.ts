@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ProbeResult } from './http-probe.service';
+import { HttpProbeService, ProbeResult } from './http-probe.service';
+import { IncidentEvaluatorService } from '../../incidents/incident-evaluator.service';
 import { ExecutionStatus } from '@prisma/client';
 
 export interface ExecutionQueryOptions {
@@ -15,7 +16,102 @@ export interface ExecutionQueryOptions {
 export class MonitorExecutionService {
   private readonly logger = new Logger(MonitorExecutionService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly httpProbeService: HttpProbeService,
+    private readonly incidentEvaluator: IncidentEvaluatorService,
+  ) {}
+
+  /**
+   * Complete execution lifecycle:
+   * 1. Load monitor & environment
+   * 2. Build URL & headers
+   * 3. Execute HTTP probe
+   * 4. Persist MonitorExecution
+   * 5. Evaluate incidents & return normalized execution
+   */
+  async executeMonitor(monitorId: string) {
+    const monitor = await this.prisma.monitor.findUnique({
+      where: { id: monitorId },
+      include: {
+        environment: {
+          include: {
+            api: true,
+          },
+        },
+      },
+    });
+
+    if (!monitor) {
+      this.logger.warn(`Monitor ${monitorId} not found in database. Skipping.`);
+      return null;
+    }
+
+    if (!monitor.isActive) {
+      this.logger.log(`Monitor ${monitorId} is marked inactive. Skipping.`);
+      return null;
+    }
+
+    // Resolve full target URL
+    let targetUrl = monitor.url;
+    if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+      const baseUrl = monitor.environment?.baseUrl || '';
+      const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+      const cleanPath = targetUrl.startsWith('/') ? targetUrl : `/${targetUrl}`;
+      targetUrl = `${cleanBase}${cleanPath}`;
+    }
+
+    // SSRF / Protocol validation
+    try {
+      const parsed = new URL(targetUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        this.logger.error(`Blocked probe: invalid protocol "${parsed.protocol}". Only HTTP and HTTPS allowed.`);
+        return null;
+      }
+    } catch (e: any) {
+      this.logger.error(`Blocked probe: malformed target URL "${targetUrl}"`);
+      return null;
+    }
+
+    // Merge environment variables / headers with monitor headers
+    const envHeaders = (monitor.environment?.variables as Record<string, string>) || {};
+    const monitorHeaders = (monitor.headers as Record<string, string>) || {};
+    const mergedHeaders = { ...envHeaders, ...monitorHeaders };
+
+    // Determine expected status code from assertions or default 200
+    let expectedStatus = 200;
+    const assertionsList = Array.isArray(monitor.assertions) ? (monitor.assertions as any[]) : [];
+    const statusAssertion = assertionsList.find((a) => a && (a.type === 'statusCode' || a.type === 'status'));
+    if (statusAssertion && statusAssertion.expected) {
+      expectedStatus = parseInt(statusAssertion.expected, 10);
+    }
+
+    // Structured logging: log method and URL without credentials
+    this.logger.log(`[MonitoringWorker] Request: ${monitor.method} ${targetUrl}`);
+
+    // Execute probe (Agentless network call)
+    const probeResult = await this.httpProbeService.probe({
+      method: monitor.method,
+      url: targetUrl,
+      headers: mergedHeaders,
+      body: monitor.body || undefined,
+      timeoutMs: monitor.timeoutMs,
+      expectedStatusCode: expectedStatus,
+      assertions: assertionsList,
+    });
+
+    // Persist telemetry record to PostgreSQL
+    const execution = await this.recordExecution(monitor.id, probeResult);
+
+    // Evaluate alert rules and incident state machine
+    try {
+      await this.incidentEvaluator.evaluateMonitor(monitor.id);
+    } catch (err: any) {
+      this.logger.warn(`Incident evaluation skipped: ${err.message}`);
+    }
+
+    return execution;
+  }
 
   async recordExecution(monitorId: string, result: ProbeResult) {
     try {

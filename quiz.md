@@ -537,6 +537,48 @@ Understand intuitive spatial manipulation on a 12-column responsive grid, visual
 
 ---
 
+## QUIZ-009 — Monitoring Engine, Worker Architecture & Telemetry Persistence
+
+**Feature:**
+Sentinel Core Monitoring Engine & MonitorExecution System
+
+**Date:**
+2026-10-26
+
+**Status:**
+Stored for Learning & Review
+
+**Purpose:**
+Understand distributed queueing with BullMQ, decoupling workers from domain and network layers, probe determinism over retries, error taxonomy, historical telemetry utility, SSRF security defenses, and resource concurrency controls.
+
+### Questions:
+
+1. **Why use BullMQ with Redis instead of Node timers or in-memory queues?**:
+   Why is using BullMQ with Redis fundamentally necessary for scheduled synthetic monitoring compared to Node's native `setInterval` or in-memory task runners? What happens to recurring schedules when worker nodes scale horizontally, crash, or restart?
+
+2. **Why separate `Monitor` and `MonitorExecution` into distinct database entities?**:
+   From a database architecture and query performance perspective, why must `Monitor` (desired configuration state) and `MonitorExecution` (immutable observation state) live in separate PostgreSQL tables rather than appending execution logs to a JSON array column on `Monitor`?
+
+3. **Why shouldn't the BullMQ worker contain all HTTP request and parsing logic?**:
+   Why should `MonitoringWorker` delegate to `MonitorExecutionService` and `HttpProbeService` rather than performing network calls, URL resolution, and assertion evaluations directly inside the worker process handler?
+
+4. **Why avoid automatic retries for failed monitoring probes?**:
+   In synthetic health monitoring, why is automatic retry upon failure an anti-pattern? How do retries distort response latency measurements, mask real intermittent downtime, and amplify load on struggling downstream APIs?
+
+5. **Why strictly distinguish HTTP errors from network errors?**:
+   Why must an HTTP 500 status code never be categorized as a `NETWORK_ERROR`, and why must a socket timeout never receive a synthetic status code (e.g. `504` or `null`)? How does this clean distinction assist SREs in root-cause analysis?
+
+6. **Why use historical execution records instead of only tracking "current status"?**:
+   Why is storing immutable historical execution records (`MonitorExecution`) critical for an observability platform? What calculations (e.g., uptime SLAs, latency percentiles P50/P90/P95/P99, MTTR) become impossible if the system only records the latest status of each monitor?
+
+7. **Why is Server-Side Request Forgery (SSRF) a critical concern in synthetic monitoring, and how is it mitigated?**:
+   Because Sentinel makes outbound HTTP requests to user-defined URLs, what attacks could a malicious user attempt if endpoints are not strictly validated? How do protocol allowlisting (`http:`, `https:`), URL validation, and tenant scoping mitigate SSRF?
+
+8. **Why must worker concurrency be explicitly controlled?**:
+   Why should the monitoring worker limit concurrent outbound requests (e.g., `concurrency: 10`) rather than running an unbounded number of simultaneous checks? What OS and network bottlenecks occur if concurrency is uncontrolled?
+
+---
+
 ## Historical Architecture Quizzes Archive
 
 ### Phase 1 & 2: Backend Architecture & Reliability Intelligence Archive

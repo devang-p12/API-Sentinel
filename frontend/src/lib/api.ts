@@ -47,9 +47,18 @@ export interface MonitorExecution {
   status: 'SUCCESS' | 'FAILED' | 'TIMEOUT' | 'ERROR';
   statusCode: number | null;
   responseTimeMs: number;
+  durationMs?: number;
   responseSize: number | null;
   errorMessage: string | null;
+  errorType?: 'SUCCESS' | 'HTTP_ERROR' | 'TIMEOUT' | 'NETWORK_ERROR' | 'SCHEMA_ERROR' | 'UNKNOWN_ERROR' | string | null;
+  schemaValid?: boolean;
+  sslValid?: boolean;
+  responseHeaders?: Record<string, string> | null;
   assertionResults?: any[];
+  startedAt?: string;
+  completedAt?: string;
+  createdAt?: string;
+  success?: boolean;
   executedAt: string;
 }
 
@@ -300,10 +309,32 @@ export const api = {
     fetchJson<Monitor>(`/monitors/${id}`, {
       method: 'DELETE',
     }),
+  enableMonitor: (id: string) =>
+    fetchJson<Monitor>(`/monitors/${id}/enable`, { method: 'POST' }),
+  disableMonitor: (id: string) =>
+    fetchJson<Monitor>(`/monitors/${id}/disable`, { method: 'POST' }),
   triggerMonitorRun: (id: string) =>
-    fetchJson<{ message: string }>(`/monitors/${id}/run`, { method: 'POST' }),
-  getMonitorExecutions: (id: string, limit: number = 30) =>
-    fetchJson<MonitorExecution[]>(`/monitors/${id}/executions?limit=${limit}`),
+    fetchJson<{ message: string; monitorId: string; queued: boolean; timestamp: string }>(`/monitors/${id}/run`, { method: 'POST' }),
+  getMonitorExecutions: (
+    id: string,
+    optionsOrLimit: number | { limit?: number; offset?: number; from?: string; to?: string; status?: string } = 30
+  ) => {
+    let query = '';
+    if (typeof optionsOrLimit === 'number') {
+      query = `?limit=${optionsOrLimit}`;
+    } else if (optionsOrLimit && typeof optionsOrLimit === 'object') {
+      const params = new URLSearchParams();
+      if (optionsOrLimit.limit !== undefined) params.set('limit', String(optionsOrLimit.limit));
+      if (optionsOrLimit.offset !== undefined) params.set('offset', String(optionsOrLimit.offset));
+      if (optionsOrLimit.from) params.set('from', optionsOrLimit.from);
+      if (optionsOrLimit.to) params.set('to', optionsOrLimit.to);
+      if (optionsOrLimit.status) params.set('status', optionsOrLimit.status);
+      query = `?${params.toString()}`;
+    }
+    return fetchJson<MonitorExecution[]>(`/monitors/${id}/executions${query}`);
+  },
+  getMonitorExecutionById: (id: string, executionId: string) =>
+    fetchJson<MonitorExecution>(`/monitors/${id}/executions/${executionId}`),
   getMonitorAnalytics: (id: string, from?: string, to?: string) => {
     const params = new URLSearchParams();
     if (from) params.set('from', from);

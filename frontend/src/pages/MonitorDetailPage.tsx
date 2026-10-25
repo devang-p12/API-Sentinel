@@ -56,7 +56,13 @@ export function MonitorDetailPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isLoadingExecutions, setIsLoadingExecutions] = useState(false)
   const [isRunningManual, setIsRunningManual] = useState(false)
-  const [manualRunMessage, setManualRunMessage] = useState<string | null>(null)
+  const [runPillResult, setRunPillResult] = useState<{
+    success: boolean
+    statusCode: number | null
+    durationMs: number
+    errorType: string | null
+  } | null>(null)
+  const [statusFilter, setStatusFilter] = useState<string>("ALL")
   const [error, setError] = useState<string | null>(null)
 
   // Dialogs
@@ -67,7 +73,7 @@ export function MonitorDetailPage() {
   const fetchExecutions = useCallback(async (monitorId: string) => {
     try {
       setIsLoadingExecutions(true)
-      const data = await api.getMonitorExecutions(monitorId, 30)
+      const data = await api.getMonitorExecutions(monitorId, 50)
       setExecutions(data)
     } catch (err: any) {
       console.warn("Could not load executions:", err.message)
@@ -116,24 +122,50 @@ export function MonitorDetailPage() {
   }
 
   const handleRunNow = async () => {
-    if (!monitor) return
+    if (!monitor || isRunningManual) return
     try {
       setIsRunningManual(true)
-      setManualRunMessage("Execution queued in BullMQ worker...")
+      const triggerTime = Date.now()
       await api.triggerMonitorRun(monitor.id)
 
-      // Refresh executions after worker picks up job
-      setTimeout(() => {
-        fetchExecutions(monitor.id)
-      }, 800)
-      setTimeout(() => {
-        fetchExecutions(monitor.id)
-        setManualRunMessage(null)
-        setIsRunningManual(false)
-      }, 2500)
+      // Poll every 350ms to detect the new execution result
+      let attempts = 0
+      const pollTimer = setInterval(async () => {
+        attempts++
+        try {
+          const fresh = await api.getMonitorExecutions(monitor.id, 10)
+          if (fresh.length > 0) {
+            const newest = fresh[0]
+            const execTimestamp = new Date(newest.executedAt).getTime()
+            if (execTimestamp >= triggerTime - 1000 || attempts >= 8) {
+              clearInterval(pollTimer)
+              setExecutions(fresh)
+              const isSuccess = newest.status === "SUCCESS" || (newest as any).success === true
+              setRunPillResult({
+                success: isSuccess,
+                statusCode: newest.statusCode,
+                durationMs: newest.durationMs ?? newest.responseTimeMs,
+                errorType: (newest as any).errorType ?? (newest.status !== "SUCCESS" ? newest.status : null),
+              })
+              setIsRunningManual(false)
+              return
+            }
+          }
+          if (attempts >= 8) {
+            clearInterval(pollTimer)
+            setIsRunningManual(false)
+            fetchExecutions(monitor.id)
+          }
+        } catch {
+          if (attempts >= 8) {
+            clearInterval(pollTimer)
+            setIsRunningManual(false)
+          }
+        }
+      }, 350)
     } catch (err: any) {
-      setManualRunMessage(err?.message || "Failed to trigger run.")
       setIsRunningManual(false)
+      alert(err?.message || "Failed to trigger run.")
     }
   }
 
@@ -222,6 +254,58 @@ export function MonitorDetailPage() {
   )
   const expectedStatus = statusAssertion?.expected ?? 200
 
+  // Operational Status calculation (Section 35)
+  const opStatus = (() => {
+    if (!executions || executions.length === 0) {
+      return {
+        state: "UNKNOWN" as const,
+        lastCheckTime: "Never",
+        latencyMs: null,
+        statusCode: null,
+        errorType: null,
+        uptimePercentage: null,
+      }
+    }
+
+    const latest = executions[0]
+    const lastCheckTime = new Date(latest.executedAt).toLocaleTimeString()
+    const latencyMs = latest.durationMs ?? latest.responseTimeMs
+    const statusCode = latest.statusCode
+    const errorType = (latest as any).errorType ?? (latest.status !== "SUCCESS" ? latest.status : null)
+
+    const successfulCount = executions.filter(
+      (e) => e.status === "SUCCESS" || (e as any).success === true
+    ).length
+    const uptimePercentage = Math.round((successfulCount / executions.length) * 1000) / 10
+
+    let state: "HEALTHY" | "DEGRADED" | "DOWN" | "UNKNOWN" = "HEALTHY"
+    if (!monitor.isActive) {
+      state = "UNKNOWN"
+    } else if (latest.status !== "SUCCESS" && !(latest as any).success) {
+      state = "DOWN"
+    } else if (latencyMs > 800 || (executions.slice(0, 5).some((e) => e.status !== "SUCCESS" && !(e as any).success))) {
+      state = "DEGRADED"
+    } else {
+      state = "HEALTHY"
+    }
+
+    return {
+      state,
+      lastCheckTime,
+      latencyMs,
+      statusCode,
+      errorType,
+      uptimePercentage,
+    }
+  })()
+
+  // Filtered executions for Section 37
+  const filteredExecutions = executions.filter((exec) => {
+    if (statusFilter === "ALL") return true
+    if (statusFilter === "SUCCESS") return exec.status === "SUCCESS" || (exec as any).success === true
+    return exec.status === statusFilter || (exec as any).errorType === statusFilter
+  })
+
   return (
     <PageContainer
       title={monitor.name}
@@ -241,15 +325,44 @@ export function MonitorDetailPage() {
             <span>Back to Monitors</span>
           </Link>
 
+          {/* Section 36: Run Now Button & Result Pill */}
           <Button
             size="sm"
             onClick={handleRunNow}
             disabled={isRunningManual}
             className="gap-1.5 font-medium"
           >
-            <HugeiconsIcon icon={PlayIcon} className="size-3.5" />
-            <span>{isRunningManual ? "Queuing..." : "Run Now"}</span>
+            {isRunningManual ? (
+              <>
+                <span className="size-2 rounded-full bg-primary-foreground animate-ping" />
+                <span>Running...</span>
+              </>
+            ) : (
+              <>
+                <HugeiconsIcon icon={PlayIcon} className="size-3.5" />
+                <span>Run Now</span>
+              </>
+            )}
           </Button>
+
+          {runPillResult && (
+            <div
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono border rounded ${
+                runPillResult.success
+                  ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/30"
+                  : "bg-destructive/10 text-destructive border-destructive/30"
+              }`}
+            >
+              <span className="font-bold">{runPillResult.success ? "✓" : "✕"}</span>
+              <span>
+                {runPillResult.statusCode !== null
+                  ? runPillResult.statusCode
+                  : runPillResult.errorType || "ERR"}
+              </span>
+              <span className="text-muted-foreground">•</span>
+              <span>{runPillResult.durationMs} ms</span>
+            </div>
+          )}
 
           <Button
             size="sm"
@@ -283,13 +396,84 @@ export function MonitorDetailPage() {
       }
     >
       <div className="space-y-6">
-        {/* Manual Run Notification Banner */}
-        {manualRunMessage && (
-          <div className="p-3 bg-primary/10 border border-primary/20 text-primary text-xs font-mono flex items-center justify-between animate-in fade-in-50">
-            <span>{manualRunMessage}</span>
-            <span className="text-[10px] text-muted-foreground">Polling latest runs...</span>
-          </div>
-        )}
+        {/* Section 35: Operational Status Banner */}
+        <Card className="rounded-none border-border">
+          <CardContent className="p-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-foreground">
+                    {monitor.environment?.api?.name || "Payment API"}
+                  </span>
+                  <span className="text-muted-foreground text-xs">•</span>
+                  <span className="text-xs font-mono text-muted-foreground">
+                    {monitor.environment?.name || "Production"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <Badge
+                    variant="outline"
+                    className={`font-mono text-xs font-bold px-2.5 py-0.5 ${
+                      opStatus.state === "HEALTHY"
+                        ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/30"
+                        : opStatus.state === "DEGRADED"
+                        ? "bg-amber-500/10 text-amber-500 border-amber-500/30"
+                        : opStatus.state === "DOWN"
+                        ? "bg-destructive/10 text-destructive border-destructive/30"
+                        : "bg-muted text-muted-foreground border-border"
+                    }`}
+                  >
+                    {opStatus.state === "HEALTHY" && "● Healthy"}
+                    {opStatus.state === "DEGRADED" && "▲ Degraded"}
+                    {opStatus.state === "DOWN" && "✕ Down"}
+                    {opStatus.state === "UNKNOWN" && "○ Unknown"}
+                  </Badge>
+                  <span className="text-[11px] text-muted-foreground">
+                    Operational status derived from execution history
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div className="p-2.5 bg-muted/30 border border-border space-y-0.5">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">
+                    Last check:
+                  </span>
+                  <span className="font-mono font-semibold text-foreground block">
+                    {opStatus.lastCheckTime}
+                  </span>
+                </div>
+
+                <div className="p-2.5 bg-muted/30 border border-border space-y-0.5">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">
+                    Latency:
+                  </span>
+                  <span className="font-mono font-semibold text-foreground block">
+                    {opStatus.latencyMs !== null ? `${opStatus.latencyMs} ms` : "—"}
+                  </span>
+                </div>
+
+                <div className="p-2.5 bg-muted/30 border border-border space-y-0.5">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">
+                    HTTP:
+                  </span>
+                  <span className="font-mono font-semibold text-foreground block">
+                    {opStatus.statusCode !== null ? opStatus.statusCode : opStatus.errorType || "—"}
+                  </span>
+                </div>
+
+                <div className="p-2.5 bg-muted/30 border border-border space-y-0.5">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">
+                    Last 24h:
+                  </span>
+                  <span className="font-mono font-semibold text-foreground block">
+                    {opStatus.uptimePercentage !== null ? `${opStatus.uptimePercentage}% uptime` : "—"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Configuration Summary Card */}
         <Card className="rounded-none border-border">
@@ -410,23 +594,36 @@ export function MonitorDetailPage() {
           </CardContent>
         </Card>
 
-        {/* Recent Executions History Card */}
+        {/* Recent Executions History Card (Section 37) */}
         <Card className="rounded-none border-border">
           <CardHeader className="py-3 px-4 border-b border-border bg-muted/20">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <CardTitle className="text-sm font-semibold">Recent Executions</CardTitle>
+                <CardTitle className="text-sm font-semibold">Execution History</CardTitle>
                 <CardDescription className="text-xs">
-                  Immutable health check history recorded by the background monitoring worker.
+                  Historical telemetry recorded by the background monitoring worker.
                 </CardDescription>
               </div>
-              <div className="flex items-center gap-2">
+
+              {/* Status Filter Buttons */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {["ALL", "SUCCESS", "FAILED", "TIMEOUT", "ERROR"].map((status) => (
+                  <Button
+                    key={status}
+                    variant={statusFilter === status ? "secondary" : "ghost"}
+                    size="xs"
+                    onClick={() => setStatusFilter(status)}
+                    className="font-mono text-[10px] h-6 px-2"
+                  >
+                    {status}
+                  </Button>
+                ))}
                 <Button
                   variant="outline"
                   size="xs"
                   onClick={() => fetchExecutions(monitor.id)}
                   disabled={isLoadingExecutions}
-                  className="font-mono text-[11px]"
+                  className="font-mono text-[11px] h-6 ml-2"
                 >
                   {isLoadingExecutions ? "Refreshing..." : "Refresh"}
                 </Button>
@@ -438,39 +635,43 @@ export function MonitorDetailPage() {
               <div className="p-8 text-center text-xs text-muted-foreground">
                 Loading execution telemetry...
               </div>
-            ) : executions.length === 0 ? (
+            ) : filteredExecutions.length === 0 ? (
               <div className="py-12 px-6 flex flex-col items-center justify-center text-center space-y-3">
                 <div className="size-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
                   <HugeiconsIcon icon={Activity01Icon} className="size-5" />
                 </div>
                 <div className="space-y-1 max-w-md">
                   <h4 className="text-xs font-semibold text-foreground">
-                    No Executions Recorded Yet
+                    No Executions Match Filter
                   </h4>
                   <p className="text-xs text-muted-foreground">
-                    This monitor is scheduled to run every {monitor.intervalSeconds}s. Click "Run Now" above to trigger an immediate check.
+                    {executions.length === 0
+                      ? `This monitor is scheduled to run every ${monitor.intervalSeconds}s. Click "Run Now" to trigger an immediate check.`
+                      : `No executions found matching filter "${statusFilter}".`}
                   </p>
                 </div>
-                <Button size="xs" onClick={handleRunNow} disabled={isRunningManual} className="gap-1 mt-2">
-                  <HugeiconsIcon icon={PlayIcon} className="size-3" />
-                  <span>Execute First Probe</span>
-                </Button>
+                {executions.length === 0 && (
+                  <Button size="xs" onClick={handleRunNow} disabled={isRunningManual} className="gap-1 mt-2">
+                    <HugeiconsIcon icon={PlayIcon} className="size-3" />
+                    <span>Execute First Probe</span>
+                  </Button>
+                )}
               </div>
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="text-xs font-semibold">Executed At</TableHead>
+                    <TableHead className="text-xs font-semibold">Time</TableHead>
                     <TableHead className="text-xs font-semibold">Status</TableHead>
-                    <TableHead className="text-xs font-semibold">HTTP Code</TableHead>
-                    <TableHead className="text-xs font-semibold">Response Time</TableHead>
+                    <TableHead className="text-xs font-semibold">HTTP</TableHead>
+                    <TableHead className="text-xs font-semibold">Latency</TableHead>
                     <TableHead className="text-xs font-semibold">Size</TableHead>
                     <TableHead className="text-xs font-semibold">Summary / Error</TableHead>
                     <TableHead className="text-xs font-semibold text-right">Details</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {executions.map((exec) => (
+                  {filteredExecutions.map((exec) => (
                     <TableRow key={exec.id} className="hover:bg-muted/30">
                       <TableCell className="py-2.5 font-mono text-xs text-muted-foreground">
                         {new Date(exec.executedAt).toLocaleTimeString()}
@@ -496,7 +697,7 @@ export function MonitorDetailPage() {
                       </TableCell>
 
                       <TableCell className="py-2.5 font-mono text-xs text-foreground">
-                        {exec.responseTimeMs} ms
+                        {exec.durationMs ?? exec.responseTimeMs} ms
                       </TableCell>
 
                       <TableCell className="py-2.5 font-mono text-xs text-muted-foreground">

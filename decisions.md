@@ -661,6 +661,59 @@ Replace manual menu-driven position shifting ("Shift Left", "Shift Right", "Row 
 **Date:**
 2026-10-26
 
+---
+
+## ADR-022: Core Monitoring Engine, Distributed Worker Architecture, and Telemetry Persistence
+
+**Decision:**
+Implement a decoupled, reliable backend monitoring engine for Sentinel adhering to the pipeline:
+`API` → `Environment` → `Monitor` → `Scheduler` → `BullMQ / Redis` → `MonitoringWorker` → `MonitorExecutionService` → `HttpMonitorClient` → `Target API` → `MonitorExecution` (`PostgreSQL`) → `Historical Telemetry Data`.
+
+### Key Architectural Pillars:
+
+1. **Why BullMQ with Redis for Queueing:**
+   - **Reason:** In-process timers (`setInterval`, `setTimeout`) in Node.js are bound to single-process memory, drift over time, fail across cluster instances, and disappear completely on application restart. BullMQ provides durable, Redis-backed repeatable jobs with deterministic deduplication keys (`monitor-${monitorId}`) and immediate one-off execution queues (`immediate-${monitorId}-${timestamp}`).
+   - **Alternatives considered:**
+     - *In-memory Node timers*: Unreliable, drifts, lost on restart, cannot scale horizontally across worker nodes.
+     - *Cron / node-cron in NestJS*: Lacks job lifecycle state, cannot distribute jobs across worker instances, and offers no visibility into pending or stalled runs.
+     - *Kafka / RabbitMQ*: Excessive operational overhead for simple recurring ping schedules.
+   - **Consequences:** Scheduling is distributed, crash-resilient, and horizontally scalable across multiple worker pods.
+
+2. **Why Separate `MonitorExecutionService` from `MonitoringWorker`:**
+   - **Reason:** Separation of Concerns. The `MonitoringWorker` is strictly an orchestration consumer responsible for pulling jobs from the BullMQ queue, managing concurrency, and handling worker-level failures. The `MonitorExecutionService` encapsulates the full domain lifecycle: loading current monitor & environment state from PostgreSQL, constructing secure URLs & headers, executing the probe, recording the immutable `MonitorExecution` entity, and triggering alert evaluation.
+   - **Tradeoffs:** Adds an abstraction layer between BullMQ and the HTTP client, but prevents duplicated execution logic between background worker jobs and manual on-demand executions (`POST /monitors/:id/run`).
+
+3. **Why Separate Dedicated HTTP Client (`HttpProbeService` / `HttpMonitorClient`):**
+   - **Reason:** Network I/O mechanics (timeouts, DNS resolution, redirects, response size capping at 32KB, sensitive header redaction, monotonic duration measurement using `performance.now()`) must be isolated from database and business logic. This enables independent unit testing of network anomalies without mocking database calls or BullMQ queues.
+
+4. **Why No Automatic Retries for Probe Failures:**
+   - **Reason:** Automatic network retries distort synthetic monitoring telemetry:
+     - *Latency distortion*: Retrying a 5-second timeout turns a 5s check into a 15s check.
+     - *Traffic amplification*: Hammering a struggling customer server with retries exacerbates cascading failures.
+     - *Masked intermittent failures*: Retries hide real transient downtime, giving customers a false sense of reliability.
+     - Every execution attempt must be recorded deterministically as `HTTP_ERROR`, `TIMEOUT`, or `NETWORK_ERROR`. Consecutive failure thresholds for alerts belong in the `AlertRule` engine (e.g. "alert after 3 consecutive failures"), not inside the HTTP probe runner.
+
+5. **Why Store Immutable Execution History (`MonitorExecution`):**
+   - **Reason:** Observability requires historical context. Recording every execution attempt with `(startedAt, completedAt, durationMs, statusCode, status, errorType, schemaValid, responseSize)` enables accurate uptime SLA calculations, P50/P90/P95/P99 latency trends, error rate distributions, and post-incident root cause forensics.
+
+6. **Why Controlled Worker Concurrency:**
+   - **Reason:** Unbounded outbound HTTP requests can exhaust local OS socket descriptors (ephemeral port exhaustion), overload Redis connections, and cause noisy-neighbor interference where slow monitors starve fast monitors. A configurable concurrency pool (`concurrency: 10`, customizable via `MONITOR_WORKER_CONCURRENCY`) ensures deterministic resource allocation.
+
+7. **How SSRF (Server-Side Request Forgery) is Mitigated:**
+   - **Reason:** An agentless monitoring service initiates outbound HTTP requests based on user-configured endpoints. Without strict validation, malicious actors could probe local loopback services (`http://localhost`, `http://127.0.0.1`, `http://169.254.169.254` AWS metadata) or internal cloud resources.
+   - **Mitigation:**
+     - Strict protocol allowlisting: only `http:` and `https:` schemes are permitted; non-HTTP schemes (`file:`, `ftp:`, `gopher:`) are rejected immediately.
+     - URL parsing and validation via native `URL` parser before network dispatch.
+     - Multi-tenant role-based isolation: a user can only trigger monitors within their authorized Organization and Project hierarchy.
+     - Never act as an open proxy: arbitrary user-supplied URLs cannot be passed through open gateway endpoints without belonging to a registered Environment.
+
+**Consequences:**
+- The monitoring engine is resilient, secure, observable, and strictly isolated from the dashboard UI.
+- All historical data is available via `GET /monitors/:id/executions` with pagination, date ranges, and status filtering.
+
+**Date:**
+2026-10-26
+
 
 
 

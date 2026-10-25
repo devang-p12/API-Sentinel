@@ -4,6 +4,7 @@ import { ExecutionStatus, HttpMethod } from '@prisma/client';
 export interface ProbeTarget {
   method: HttpMethod;
   url: string;
+  queryParams?: Record<string, string | number>;
   headers?: Record<string, string>;
   body?: string;
   timeoutMs: number;
@@ -33,6 +34,20 @@ export class HttpProbeService {
     let isTimeout = false;
 
     try {
+      // Build final URL including optional query parameters
+      let finalUrl = target.url;
+      if (target.queryParams && Object.keys(target.queryParams).length > 0) {
+        try {
+          const urlObj = new URL(finalUrl);
+          for (const [k, v] of Object.entries(target.queryParams)) {
+            urlObj.searchParams.set(k, String(v));
+          }
+          finalUrl = urlObj.toString();
+        } catch {
+          // If URL parsing fails, retain original
+        }
+      }
+
       const requestHeaders: Record<string, string> = {
         'User-Agent': 'API-Sentinel/1.0 (+https://github.com/api-sentinel)',
         ...(target.headers || {}),
@@ -51,20 +66,25 @@ export class HttpProbeService {
         }
       }
 
-      const response = await fetch(target.url, fetchOptions);
+      const response = await fetch(finalUrl, fetchOptions);
       clearTimeout(timeoutId);
 
       const endTime = performance.now();
       const responseTimeMs = Math.round(endTime - startTime);
 
-      // Extract response text and size
-      const responseText = await response.text();
-      const responseSize = Buffer.byteLength(responseText, 'utf8');
+      // Extract response text and size (capped at 32KB to avoid unbounded memory/storage growth)
+      const rawResponseText = await response.text();
+      const responseSize = Buffer.byteLength(rawResponseText, 'utf8');
+      const responseText = rawResponseText.slice(0, 32768);
 
-      // Extract headers
+      // Extract headers with sensitive tokens redacted
       const responseHeaders: Record<string, string> = {};
       response.headers.forEach((value, key) => {
-        responseHeaders[key] = value;
+        if (['set-cookie', 'authorization'].includes(key.toLowerCase())) {
+          responseHeaders[key] = '***REDACTED***';
+        } else {
+          responseHeaders[key] = value;
+        }
       });
 
       // Evaluate Assertions
@@ -197,3 +217,7 @@ export class HttpProbeService {
     }
   }
 }
+
+// Section 7 dedicated service alias:
+export { HttpProbeService as HttpMonitorClient };
+

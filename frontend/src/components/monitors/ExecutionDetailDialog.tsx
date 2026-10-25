@@ -76,7 +76,7 @@ export function ExecutionDetailDialog({
 
             <div className="p-2.5 bg-muted/40 border border-border space-y-0.5">
               <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">
-                HTTP Code
+                HTTP Status
               </span>
               <span className="font-semibold text-foreground font-mono">
                 {execution.statusCode !== null ? execution.statusCode : "—"}
@@ -85,16 +85,16 @@ export function ExecutionDetailDialog({
 
             <div className="p-2.5 bg-muted/40 border border-border space-y-0.5">
               <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">
-                Latency
+                Duration
               </span>
               <span className="font-semibold text-foreground font-mono">
-                {execution.responseTimeMs} ms
+                {execution.durationMs ?? execution.responseTimeMs} ms
               </span>
             </div>
 
             <div className="p-2.5 bg-muted/40 border border-border space-y-0.5">
               <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">
-                Payload Size
+                Response Size
               </span>
               <span className="font-semibold text-foreground font-mono">
                 {execution.responseSize !== null ? `${execution.responseSize} B` : "—"}
@@ -102,22 +102,52 @@ export function ExecutionDetailDialog({
             </div>
           </div>
 
-          {/* Timestamp */}
-          <div className="p-2 bg-muted/20 border border-border font-mono text-[11px] text-muted-foreground">
-            <span className="text-foreground font-medium">Executed At: </span>
-            {new Date(execution.executedAt).toLocaleString()} ({new Date(execution.executedAt).toISOString()})
+          {/* Timing details */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono">
+            <div className="p-2 bg-muted/20 border border-border text-muted-foreground">
+              <span className="text-foreground font-medium">Started At: </span>
+              {execution.startedAt ? new Date(execution.startedAt).toLocaleString() : new Date(execution.executedAt).toLocaleString()}
+            </div>
+            <div className="p-2 bg-muted/20 border border-border text-muted-foreground">
+              <span className="text-foreground font-medium">Completed At: </span>
+              {execution.completedAt ? new Date(execution.completedAt).toLocaleString() : new Date(new Date(execution.executedAt).getTime() + (execution.durationMs ?? execution.responseTimeMs)).toLocaleString()}
+            </div>
           </div>
 
           {/* Error Callout */}
-          {execution.errorMessage && (
+          {(execution.errorMessage || execution.errorType) && execution.status !== 'SUCCESS' && (
             <div className="p-3 bg-destructive/10 border border-destructive/20 text-destructive text-xs space-y-1">
-              <span className="font-semibold block">Failure Reason</span>
-              <p className="font-mono text-[11px] break-all">{execution.errorMessage}</p>
+              <div className="flex items-center justify-between">
+                <span className="font-semibold block">Failure Reason</span>
+                {execution.errorType && (
+                  <Badge variant="outline" className="font-mono text-[9px] bg-destructive/20 text-destructive border-destructive/40">
+                    {execution.errorType}
+                  </Badge>
+                )}
+              </div>
+              <p className="font-mono text-[11px] break-all">{execution.errorMessage || 'Execution encountered an unexpected error.'}</p>
+            </div>
+          )}
+
+          {/* Schema Validation Result */}
+          {execution.schemaValid !== undefined && (
+            <div className="p-2.5 border border-border bg-muted/10 flex items-center justify-between text-xs font-mono">
+              <span className="text-foreground font-medium">Schema Contract Result:</span>
+              <Badge
+                variant="outline"
+                className={`text-[10px] ${
+                  execution.schemaValid
+                    ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
+                    : "bg-destructive/10 text-destructive border-destructive/20"
+                }`}
+              >
+                {execution.schemaValid ? "VALID" : "SCHEMA_ERROR"}
+              </Badge>
             </div>
           )}
 
           {/* Assertion Results */}
-          {execution.assertionResults && Array.isArray(execution.assertionResults) && (
+          {execution.assertionResults && Array.isArray(execution.assertionResults) && execution.assertionResults.length > 0 && (
             <div className="space-y-1.5">
               <span className="font-semibold text-foreground block text-xs">
                 Assertion Results
@@ -135,6 +165,11 @@ export function ExecutionDetailDialog({
                           expected {a.expected}, got {a.actual ?? "—"}
                         </span>
                       )}
+                      {a.errors && Array.isArray(a.errors) && a.errors.length > 0 && (
+                        <div className="text-[10px] text-destructive mt-0.5">
+                          {a.errors.join("; ")}
+                        </div>
+                      )}
                     </div>
                     <Badge
                       variant="outline"
@@ -146,6 +181,23 @@ export function ExecutionDetailDialog({
                     >
                       {a.passed ? "PASSED" : "FAILED"}
                     </Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Redacted Safe Response Headers */}
+          {execution.responseHeaders && Object.keys(execution.responseHeaders).length > 0 && (
+            <div className="space-y-1.5 pt-1">
+              <span className="font-semibold text-foreground block text-xs">
+                Response Headers (Tokens Redacted)
+              </span>
+              <div className="max-h-28 overflow-y-auto p-2 bg-muted/20 border border-border font-mono text-[10px] space-y-0.5">
+                {Object.entries(execution.responseHeaders).map(([key, val]) => (
+                  <div key={key} className="flex gap-2">
+                    <span className="text-muted-foreground">{key}:</span>
+                    <span className="text-foreground break-all">{val}</span>
                   </div>
                 ))}
               </div>

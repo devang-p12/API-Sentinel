@@ -1344,4 +1344,149 @@ Scenario B: Bottom query pane is open, user clicks "+ Add visualization":
    - Workspace retains clean visual focus on the metric catalog
    - When user clicks "Configure Query" in the drawer, bottom pane takes focus
 
+---
+
+## 3. Monitoring Engine & Execution Telemetry Lifecycle (Flow 7)
+
+### Flow 7.1: Continuous Background Probe Execution
+
+```text
+1. Repeatable BullMQ Timer (Redis)
+   Timer triggers based on monitor.intervalSeconds (e.g. 60s, keyed by deterministic jobId `monitor-${monitorId}`)
+      │
+      ▼
+2. BullMQ Worker Dispatch:
+   Class: MonitorWorker (backend/src/monitors/workers/monitor.worker.ts)
+   - Concurrency: 10 (configurable via MONITOR_WORKER_CONCURRENCY)
+   - Structured logging: [MonitoringWorker] Starting monitor={monitorId}
+   - Invokes: executionService.executeMonitor(monitorId)
+      │
+      ▼
+3. Monitor Execution Lifecycle Orchestration:
+   Class: MonitorExecutionService.executeMonitor(monitorId) (backend/src/monitors/services/monitor-execution.service.ts)
+   ├── 1. Load Monitor & Environment:
+   │      prisma.monitor.findUnique({
+   │        where: { id: monitorId },
+   │        include: { environment: { include: { api: true } } }
+   │      })
+   │      - If !monitor -> logs warning and unschedules stale job
+   │      - If !monitor.isActive -> skips probe
+   │
+   ├── 2. Build URL & SSRF Validation:
+   │      - Combines environment.baseUrl + monitor.url (handling slashes cleanly)
+   │      - URL validation: only "http:" and "https:" protocols allowed; blocks non-HTTP schemes
+   │      - Appends optional queryParams to URL search params
+   │      - Merges environment variables with monitor-specific request headers
+   │      - Logs: [MonitoringWorker] Request: {method} {sanitizedUrl} (credentials never logged)
+   │
+   ├── 3. Execute HTTP Probe (Agentless Network Call):
+   │      Class: HttpProbeService / HttpMonitorClient (backend/src/monitors/services/http-probe.service.ts)
+   │      - AbortController timeout enforcement (timeoutMs cutoff)
+   │      - Monotonic timing: startTime = performance.now(), endTime = performance.now()
+   │      - Response body text capped at 32KB to prevent memory exhaustion
+   │      - Response headers sanitized (Set-Cookie and Authorization redacted)
+   │      - Assertion evaluation: status code check, timeout detection, schema validation
+   │      - Status categorization: SUCCESS, HTTP_ERROR, TIMEOUT, NETWORK_ERROR, SCHEMA_ERROR
+   │
+   ├── 4. Telemetry Persistence:
+   │      prisma.monitorExecution.create({
+   │        data: {
+   │          monitorId,
+   │          status: result.status,
+   │          statusCode: result.statusCode,
+   │          responseTimeMs: result.responseTimeMs,
+   │          responseSize: result.responseSize,
+   │          responseHeaders: result.responseHeaders,
+   │          assertionResults: result.assertionResults,
+   │          errorMessage: result.errorMessage,
+   │          executedAt: new Date(),
+   │        }
+   │      })
+   │
+   ├── 5. Alert & Incident Evaluation:
+   │      IncidentEvaluatorService.evaluateMonitor(monitorId) (backend/src/incidents/incident-evaluator.service.ts)
+   │      - Evaluates threshold rules (consecutive failure count)
+   │      - Triggers or auto-resolves incidents accordingly
+   │
+   └── 6. Return Normalized Execution:
+          - Formats durationMs, startedAt, completedAt, success boolean, errorType, schemaValid
+          - Logs: [MonitoringWorker] Completed: monitor={monitorId} status={code} duration={ms}ms
+```
+
+### Flow 7.2: Manual "Run Now" Execution & Real-Time Feedback
+
+```text
+1. User clicks [Run Now] button:
+   Component: frontend/src/pages/MonitorDetailPage.tsx
+   - Sets isRunningManual = true (button text transforms to "Running..." with animated pulse)
+   - Records trigger timestamp
+      │
+      ▼
+2. API Request:
+   POST /api/v1/monitors/:id/run (backend/src/monitors/monitors.controller.ts)
+      │
+      ▼
+3. Enqueue Immediate Job:
+   MonitorsService.triggerManualRun(id) (backend/src/monitors/monitors.service.ts)
+      │
+      ▼
+   MonitorSchedulerService.triggerImmediateRun(id) (backend/src/monitors/scheduler/monitor-scheduler.service.ts)
+   Pushes job to BullMQ queue: jobId `immediate-${monitorId}-${Date.now()}`
+   Returns HTTP 200: { message: "Immediate check queued...", monitorId: id, queued: true, timestamp }
+      │
+      ▼
+4. Worker Execution:
+   MonitorWorker processes job immediately via executionService.executeMonitor(id)
+   Saves MonitorExecution to PostgreSQL
+      │
+      ▼
+5. Frontend Polling & Instantaneous Result Pill:
+   MonitorDetailPage.tsx polls GET /api/v1/monitors/:id/executions?limit=10 every 350ms:
+   - Detects fresh execution record
+   - Updates local executions array and Operational Health Status card
+   - Displays result pill:
+     • Success: ✓ 200 • 142 ms (emerald badge)
+     • Failure: ✕ 500 • 523 ms (destructive badge)
+   - Resets isRunningManual = false (page remains fully interactive throughout)
+```
+
+### Flow 7.3: Execution History & Filtering
+
+```text
+1. Frontend Query:
+   GET /api/v1/monitors/:id/executions?limit=50&status=SUCCESS (backend/src/monitors/monitors.controller.ts)
+      │
+      ▼
+2. Controller & Service Query:
+   MonitorsService.getExecutions(id, { limit, offset, from, to, status })
+      │
+      ▼
+   MonitorExecutionService.getRecentExecutions(id, options)
+   Executes Prisma query:
+   prisma.monitorExecution.findMany({
+     where: { monitorId, status, executedAt: { gte: from, lte: to } },
+     orderBy: { executedAt: 'desc' },
+     take: limit,
+     skip: offset,
+   })
+      │
+      ▼
+3. Normalized Mapping:
+   formatExecution(record):
+   - durationMs: record.responseTimeMs
+   - startedAt: record.executedAt
+   - completedAt: record.executedAt + durationMs
+   - success: record.status === 'SUCCESS'
+   - errorType: 'SUCCESS' | 'HTTP_ERROR' | 'TIMEOUT' | 'NETWORK_ERROR' | 'SCHEMA_ERROR' | 'UNKNOWN_ERROR'
+   - schemaValid: boolean
+   - sslValid: boolean
+      │
+      ▼
+4. Frontend Display & Inspection:
+   - Execution History Table renders Time, Status, HTTP, Latency, Size, Summary / Error
+   - Filter buttons (ALL, SUCCESS, FAILED, TIMEOUT, ERROR) instantly filter records
+   - Clicking [Inspect] opens <ExecutionDetailDialog /> displaying full metadata without exposing sensitive credentials
+```
+
+
 
