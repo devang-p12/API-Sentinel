@@ -101,6 +101,88 @@ export interface MonitorAnalyticsSummary {
   }>;
 }
 
+export interface MetricDefinition {
+  id: string;
+  name: string;
+  description: string;
+  category: 'reliability' | 'performance' | 'traffic' | 'errors';
+  unit: string;
+  supportedVisualizations: Array<'stat' | 'time_series' | 'bar' | 'table' | 'gauge'>;
+  defaultVisualization: 'stat' | 'time_series' | 'bar' | 'table' | 'gauge';
+}
+
+export interface MetricQueryResult {
+  metric: string;
+  metricName: string;
+  unit: string;
+  timeRange: { from: string; to: string };
+  summary: {
+    current: number | null;
+    min?: number;
+    max?: number;
+    avg?: number;
+    total?: number;
+    label?: string;
+  };
+  timeSeries: Array<{ timestamp: string; value: number; label?: string }>;
+  distribution?: Array<{ category: string; count: number; percentage: number }>;
+  table?: {
+    columns: string[];
+    rows: Array<Record<string, any>>;
+  };
+}
+
+export interface DashboardWidget {
+  id: string;
+  dashboardId: string;
+  title: string;
+  metric: string;
+  visualizationType: 'stat' | 'time_series' | 'bar' | 'table' | 'gauge';
+  configuration: {
+    apiId?: string;
+    environmentId?: string;
+    monitorId?: string;
+    [key: string]: any;
+  };
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  createdAt?: string;
+  updatedAt?: string;
+  data?: MetricQueryResult;
+}
+
+export interface Dashboard {
+  id: string;
+  name: string;
+  description?: string;
+  projectId: string;
+  project?: { id: string; name: string };
+  projectName?: string;
+  layout?: any;
+  widgets: DashboardWidget[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DashboardDataResponse {
+  dashboard: {
+    id: string;
+    name: string;
+    description?: string;
+    projectId: string;
+    projectName?: string;
+    layout?: any;
+  };
+  timeRange: {
+    from: string;
+    to: string;
+    preset: string;
+  };
+  widgets: DashboardWidget[];
+}
+
 const API_BASE = '/api/v1';
 
 async function fetchJson<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -234,4 +316,89 @@ export const api = {
     fetchJson<Incident>(`/incidents/${id}/acknowledge`, { method: 'PATCH' }),
   resolveIncident: (id: string) =>
     fetchJson<Incident>(`/incidents/${id}/resolve`, { method: 'PATCH' }),
+
+  // Dashboard & Custom Visualization APIs
+  getMetricCatalog: () => fetchJson<MetricDefinition[]>('/dashboards/metrics/catalog'),
+  previewMetricQuery: (data: {
+    metric: string;
+    filters?: { projectId?: string; apiId?: string; environmentId?: string; monitorId?: string };
+    timeRange?: string;
+    from?: string;
+    to?: string;
+  }) =>
+    fetchJson<MetricQueryResult>('/dashboards/preview', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getDashboards: (projectId?: string) =>
+    fetchJson<Dashboard[]>(`/dashboards${projectId ? `?projectId=${projectId}` : ''}`),
+  getDashboard: (id: string) => fetchJson<Dashboard>(`/dashboards/${id}`),
+  getDashboardData: (id: string, timeRange?: string, from?: string, to?: string) => {
+    const params = new URLSearchParams();
+    if (timeRange) params.set('timeRange', timeRange);
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    return fetchJson<DashboardDataResponse>(`/dashboards/${id}/data?${params.toString()}`);
+  },
+  createDashboard: (data: { name: string; description?: string; projectId?: string }) =>
+    fetchJson<Dashboard>('/dashboards', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateDashboard: (id: string, data: { name?: string; description?: string; layout?: any }) =>
+    fetchJson<Dashboard>(`/dashboards/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteDashboard: (id: string) =>
+    fetchJson<{ id: string }>(`/dashboards/${id}`, {
+      method: 'DELETE',
+    }),
+  addWidget: (
+    dashboardId: string,
+    data: {
+      title: string;
+      metric: string;
+      visualizationType: string;
+      configuration?: Record<string, any>;
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+    },
+  ) =>
+    fetchJson<DashboardWidget>(`/dashboards/${dashboardId}/widgets`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateWidget: (
+    dashboardId: string,
+    widgetId: string,
+    data: Partial<{
+      title: string;
+      metric: string;
+      visualizationType: string;
+      configuration: Record<string, any>;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }>,
+  ) =>
+    fetchJson<DashboardWidget>(`/dashboards/${dashboardId}/widgets/${widgetId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteWidget: (dashboardId: string, widgetId: string) =>
+    fetchJson<{ id: string }>(`/dashboards/${dashboardId}/widgets/${widgetId}`, {
+      method: 'DELETE',
+    }),
+  updateDashboardLayout: (
+    dashboardId: string,
+    layout: Array<{ id: string; x: number; y: number; width: number; height: number }>,
+  ) =>
+    fetchJson<{ success: boolean; count: number }>(`/dashboards/${dashboardId}/layout`, {
+      method: 'PATCH',
+      body: JSON.stringify({ layout }),
+    }),
 };

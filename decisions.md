@@ -557,4 +557,36 @@ Implement all active HTTP health check executions asynchronously in a dedicated 
 **Date:**
 2026-10-25
 
+---
+
+## ADR-019: Grafana-Style Dynamic Dashboard Architecture, Metric Registry, and MetricQueryService Abstraction
+
+**Decision:**
+Implement a flexible, configuration-driven dashboard and visualization engine where dashboards are compositions of user-configured `DashboardWidget` entities rather than static, hard-coded UI cards. Establish a centralized **Metric Registry** defining standardized telemetry catalog entries and introduce a **`MetricQueryService`** abstraction layer that decouples visualization rendering from PostgreSQL `MonitorExecution` persistence. This architecture guarantees future drop-in compatibility with Prometheus without altering dashboard or widget schemas.
+
+**Reason:**
+- **Customizable Observability vs. Fixed Layouts**: Different engineering teams have distinct reliability concerns. Infrastructure engineers require P95/P99 latency distributions, SRE teams focus on error budgets and availability SLAs, and support teams track HTTP status code breakdowns. A hard-coded dashboard creates rigid constraints; a dynamic dashboard builder empowers users to arrange tailored views across multiple APIs, environments, and monitors.
+- **Widgets Store Queries, Not Values**: A widget record stores query intent (`metric: "p95_latency"`, `filters: { environmentId }`, `visualizationType: "time_series"`). Persisting computed metric values inside the widget entity would produce stale data, synchronization bugs, and excessive database writes.
+- **Metric Registry as Single Source of Truth**: Exposing arbitrary SQL or unstructured queries to the frontend creates security vulnerabilities and maintenance debt. The `Metric Registry` categorizes metrics into Reliability, Performance, Traffic, and Errors, defining compatible visualizations and units.
+- **Decoupled Data Source via `MetricQueryService`**: The dashboard layer must never query PostgreSQL or Prisma directly. `MetricQueryService` accepts a standardized `MetricQueryOptions` payload and returns a typed `MetricQueryResult`. When Prometheus is introduced in the next phase, `MetricQueryService` can route queries to Prometheus TSDB without touching the frontend or widget controllers.
+- **Separation of Visualization Rendering**: The frontend dashboard grid provides raw metric data to dedicated renderers (`StatRenderer`, `TimeSeriesRenderer`, `BarChartRenderer`, `GaugeRenderer`, `TableRenderer`). The dashboard container remains agnostic to chart mechanics.
+- **Batch Layout Persistence**: Drag-and-drop and resize operations update local UI state first. Layout coordinates `(x, y, width, height)` are batch-committed via `PATCH /dashboards/:id/layout`, preventing high-frequency API chatter during drag operations.
+
+**Alternatives considered:**
+- *Hard-coded dashboard with static tabs*:
+  - *Why rejected*: Fails the core requirement of an observability platform; cannot adapt to varying client APIs, environments, or SLA requirements.
+- *Direct Prisma queries in Dashboard controllers*:
+  - *Why rejected*: Tightly couples the dashboard feature to the relational database. Migrating to Prometheus or adding time-series aggregation engines would necessitate rewriting all dashboard endpoints.
+- *Persisting rendered metric values in `DashboardWidget`*:
+  - *Why rejected*: Values become stale within seconds; violates database normalization and turns read-heavy dashboard loads into write operations.
+
+**Consequences:**
+- Users can dynamically create, edit, duplicate, resize, and delete visualization panels across a 12-column responsive grid.
+- All visualization panels render real telemetry from `MonitorExecution` records with zero fake data.
+- The platform is primed for Prometheus integration in the next milestone.
+
+**Date:**
+2026-10-25
+
+
 

@@ -8,6 +8,7 @@ import { MonitorDetailPage } from "@/pages/MonitorDetailPage"
 import { IncidentsPage } from "@/pages/IncidentsPage"
 import { AlertsPage } from "@/pages/AlertsPage"
 import { DashboardsPage } from "@/pages/DashboardsPage"
+import { DashboardViewPage } from "@/pages/DashboardViewPage"
 import { SettingsPage } from "@/pages/SettingsPage"
 import { NotFoundPage } from "@/pages/NotFoundPage"
 
@@ -25,6 +26,7 @@ export function App() {
           <Route path="incidents" element={<IncidentsPage />} />
           <Route path="alerts" element={<AlertsPage />} />
           <Route path="dashboards" element={<DashboardsPage />} />
+          <Route path="dashboards/:id" element={<DashboardViewPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>

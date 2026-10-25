@@ -391,6 +391,67 @@ Understand background job scheduling, Redis/BullMQ queue mechanics, worker isola
 
 ---
 
+## QUIZ — Grafana-Style Dashboard Builder
+
+**Feature:**
+Grafana-Style Custom Dashboards & Visualization Engine
+
+**Date:**
+2026-10-25
+
+**Status:**
+Stored for Learning & Review
+
+**Implementation Gate:**
+None (stored for review after implementation)
+
+**Purpose:**
+Understand configuration-driven dashboard architectures, metric registry design, MetricQueryService data source isolation, visualization rendering separation, and layout persistence.
+
+### Questions:
+
+1. Why should Sentinel dashboards be configuration-driven instead of hard-coded?
+
+2. What is the difference between a Dashboard and a DashboardWidget?
+
+3. Why should a widget store a metric identifier rather than the metric's current value?
+
+4. What is the purpose of a Metric Registry?
+
+5. Why should metric calculation be separated from visualization rendering?
+
+6. What problem does MetricQueryService solve?
+
+7. Why should DashboardWidget not directly depend on Prisma?
+
+8. How will Prometheus eventually fit into MetricQueryService?
+
+9. What happens when a user adds a P95 latency visualization?
+
+10. Trace the request from:
+   "Add Visualization"
+   to
+   "Widget appears on Dashboard."
+
+11. Trace the request from:
+   "Open Dashboard"
+   to
+   "Chart is rendered."
+
+12. Why should dashboard layout be stored separately from metric data?
+
+13. Why should the frontend not contain hard-coded monitoring values?
+
+14. What is the difference between:
+   Metric
+   Metric Query
+   Visualization
+   Widget?
+
+15. Why is this architecture closer to Grafana than a fixed monitoring dashboard?
+
+---
+
 ## Historical Architecture Quizzes Archive
 
 ### Phase 1 & 2: Backend Architecture & Reliability Intelligence Archive

@@ -986,3 +986,161 @@ receives new execution record:
 Frontend renders new row in Recent Executions table with status badge,
 HTTP code, latency in ms, and timestamp. User can click row to inspect details.
 ```
+
+---
+
+## Flow: Grafana-Style Custom Dashboards & Visualization Engine
+
+### 1. Create Dashboard Flow
+
+```text
+React (frontend/src/components/dashboards/CreateDashboardDialog.tsx)
+       │  User inputs Name, Description, Project
+       ▼
+Frontend API Client: api.createDashboard(data) (frontend/src/lib/api.ts)
+       │  Dispatches: POST /api/v1/dashboards
+       ▼
+NestJS DashboardsController.create(dto) (backend/src/dashboards/dashboards.controller.ts)
+       │
+       ▼
+NestJS DashboardsService.create(dto, organizationId?) (backend/src/dashboards/dashboards.service.ts)
+       │  1. Validates dashboard name and resolves target projectId
+       │  2. Executes:
+       │     prisma.dashboard.create({
+       │       data: { name, description, projectId, layout: [] }
+       │     })
+       │
+       ▼
+Returns HTTP 201 Created with new Dashboard record
+       │
+       ▼
+React router navigates user to /dashboards/:id in view mode
+```
+
+---
+
+### 2. Add Visualization Flow
+
+```text
+User clicks [+ Add Visualization] in DashboardViewPage (frontend/src/pages/DashboardViewPage.tsx)
+       │
+       ▼
+VisualizationBuilderDialog opens (frontend/src/components/dashboards/VisualizationBuilderDialog.tsx)
+       │
+       ├── 1. Fetches metric registry: api.getMetricCatalog() ──► GET /api/v1/dashboards/metrics/catalog
+       │      (Populates Reliability, Performance, Traffic, Errors categories)
+       ├── 2. User selects Metric (e.g. "P95 Latency", "Availability", "HTTP Status Distribution")
+       ├── 3. User configures Scope & Filters (API, Environment, Monitor, Time Window)
+       ├── 4. User clicks [Preview] / triggers automatic query preview:
+       │      api.previewMetricQuery({ metric, filters, timeRange })
+       │      Dispatches: POST /api/v1/dashboards/preview
+       │      ──► MetricQueryService.query() resolves live MonitorExecution data from PostgreSQL
+       │      ──► Returns live summary, timeSeries, distribution, and table structures
+       │      ──► WidgetRenderer displays the live chart inside the dialog
+       │
+       ▼
+User confirms configuration and clicks [Add to Dashboard]
+       │
+       ▼
+Frontend API Client: api.addWidget(dashboardId, widgetData) (frontend/src/lib/api.ts)
+       │  Dispatches: POST /api/v1/dashboards/:id/widgets
+       ▼
+NestJS DashboardsController.addWidget(id, dto) (backend/src/dashboards/dashboards.controller.ts)
+       │
+       ▼
+NestJS DashboardsService.addWidget(id, dto) (backend/src/dashboards/dashboards.service.ts)
+       │  1. Validates metric exists in Metric Registry
+       │  2. Executes:
+       │     prisma.dashboardWidget.create({
+       │       data: { dashboardId, title, metric, visualizationType, configuration, width, height, x, y }
+       │     })
+       │
+       ▼
+Returns HTTP 201 Created ──► Dialog closes ──► Dashboard reloads data and renders new panel
+```
+
+---
+
+### 3. Render Custom Dashboard Flow
+
+```text
+User opens /dashboards/:id (frontend/src/pages/DashboardViewPage.tsx)
+       │
+       ▼
+Frontend API Client: api.getDashboardData(id, timeRange) (frontend/src/lib/api.ts)
+       │  Dispatches: GET /api/v1/dashboards/:id/data?timeRange=24h
+       ▼
+NestJS DashboardsController.getDashboardData(id, timeRange)
+(backend/src/dashboards/dashboards.controller.ts)
+       │
+       ▼
+NestJS DashboardsService.getDashboardData(id, timeRange)
+(backend/src/dashboards/dashboards.service.ts)
+       │
+       ├── 1. Loads Dashboard and all child Widgets from PostgreSQL via Prisma
+       ├── 2. Resolves time window (e.g. from = now - 24h, to = now)
+       ├── 3. For each widget, invokes MetricQueryService.query():
+       │      (backend/src/dashboards/services/metric-query.service.ts)
+       │      - Identifies target monitors matching widget's filter scope
+       │      - Queries PostgreSQL monitor_executions composite index: (monitor_id, executed_at DESC)
+       │      - Computes current metric value, percentiles (p50, p90, p95, p99), min, max, avg
+       │      - Generates dynamic time-series buckets (1m, 5m, 30m, or 1h buckets)
+       │      - Generates status distribution and multi-monitor table breakdowns
+       │      - Packages typed MetricQueryResult
+       │
+       ▼
+Returns HTTP 200 OK:
+{
+  dashboard: { id, name, description, projectId },
+  timeRange: { from, to, preset },
+  widgets: [
+    { id, title, metric, visualizationType, width, height, x, y, data: MetricQueryResult }
+  ]
+}
+       │
+       ▼
+Frontend DashboardGrid (frontend/src/components/dashboards/DashboardGrid.tsx)
+       │  Renders responsive 12-column grid
+       ▼
+WidgetRenderer (frontend/src/components/dashboards/renderers/WidgetRenderer.tsx)
+       ├── StatRenderer: Renders bold KPI stat, unit, and min/max/avg indicators
+       ├── TimeSeriesRenderer: Renders SVG area/line chart with hover inspection
+       ├── BarChartRenderer: Renders status code distribution meters & counts
+       ├── GaugeRenderer: Renders semi-circular radial gauge with target thresholds
+       └── TableRenderer: Renders multi-endpoint performance comparison table
+```
+
+---
+
+### 4. Layout Persistence Flow
+
+```text
+User clicks [Edit Dashboard] in DashboardViewPage
+       │  Edit mode enables: drag handles, width resize (+/-), reordering controls
+       ▼
+User moves or resizes panels
+       │  DashboardGrid updates local UI state (x, y, width, height)
+       │  Unsaved layout banner appears
+       ▼
+User clicks [Save Layout] or [Done Editing]
+       │
+       ▼
+Frontend API Client: api.updateDashboardLayout(id, layout) (frontend/src/lib/api.ts)
+       │  Dispatches: PATCH /api/v1/dashboards/:id/layout
+       │  Payload: { layout: [{ id, x, y, width, height }, ...] }
+       ▼
+NestJS DashboardsController.updateLayout(id, dto) (backend/src/dashboards/dashboards.controller.ts)
+       │
+       ▼
+NestJS DashboardsService.updateLayout(id, layout) (backend/src/dashboards/dashboards.service.ts)
+       │  Executes Prisma $transaction:
+       │  - Updates each DashboardWidget record's x, y, width, height
+       │  - Persists layout snapshot in dashboard.layout
+       │
+       ▼
+Returns HTTP 200 OK: { success: true, count: N }
+       │
+       ▼
+Frontend UI confirms layout saved and reflects persisted coordinates on page refresh
+```
+
