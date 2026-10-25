@@ -336,17 +336,27 @@ export class MonitorsService {
 
   async getExecutions(
     id: string,
-    limit: number = 50,
+    optionsOrLimit: any = 50,
     offset: number = 0,
     organizationId?: string,
   ) {
     await this.findOne(id, organizationId);
-    return this.executionService.getRecentExecutions(id, limit, offset);
+    return this.executionService.getRecentExecutions(id, optionsOrLimit, offset);
+  }
+
+  async getExecutionById(id: string, executionId: string, organizationId?: string) {
+    await this.findOne(id, organizationId);
+    return this.executionService.getExecutionById(id, executionId);
   }
 
   async triggerManualRun(id: string, organizationId?: string) {
     await this.findOne(id, organizationId);
     await this.schedulerService.triggerImmediateRun(id);
-    return { message: `Immediate check queued for monitor ${id}` };
+    return {
+      message: `Immediate check queued for monitor ${id}`,
+      monitorId: id,
+      queued: true,
+      timestamp: new Date().toISOString(),
+    };
   }
 }

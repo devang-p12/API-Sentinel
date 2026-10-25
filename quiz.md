@@ -389,6 +389,10 @@ Understand background job scheduling, Redis/BullMQ queue mechanics, worker isola
 
 14. Why are MonitorExecution records important for historical analytics?
 
+15. Why should latency percentiles (P50, P90, P95, P99) be computed on the backend/database rather than in frontend React components?
+
+16. Why should the monitoring worker avoid automatic retries on failed probes by default? How can aggressive retries distort observability metrics during an outage?
+
 ---
 
 ## QUIZ — Grafana-Style Dashboard Builder

@@ -152,6 +152,30 @@ React UI ──► Optimistically updates monitor list and renders active status
 
 ### Flow 2: Agentless Background Monitor Execution
 
+```text
+Scheduled Job
+     ↓
+BullMQ / Redis
+     ↓
+MonitoringWorker
+     ↓
+MonitorExecutionService
+     ↓
+HttpProbeService (HTTP Client)
+     ↓
+Target API
+     ↓
+Response
+     ↓
+MonitorExecution
+     ↓
+PostgreSQL
+     ↓
+MetricQueryService
+     ↓
+Dashboard WidgetRenderer
+```
+
 How scheduled monitoring jobs execute asynchronously and capture telemetry:
 
 ```text
@@ -161,7 +185,7 @@ BullMQ Repeatable Timer (Redis Event Loop)
 BullMQ Worker Pool: MonitorWorker.process(job: Job<MonitorJobData>)
       │
       ▼
-MonitorExecutionService.execute(job.data.monitorId)
+MonitorExecutionService.recordExecution(monitorId, result)
       │
       ├── 1. Fetch Current Monitor Config:
       │      PrismaService.monitor.findUnique({

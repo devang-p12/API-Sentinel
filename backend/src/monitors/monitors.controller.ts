@@ -44,6 +44,16 @@ export class MonitorsController {
     return this.monitorsService.toggle(id, enabled);
   }
 
+  @Post(':id/enable')
+  enable(@Param('id') id: string) {
+    return this.monitorsService.toggle(id, true);
+  }
+
+  @Post(':id/disable')
+  disable(@Param('id') id: string) {
+    return this.monitorsService.toggle(id, false);
+  }
+
   @Delete(':id')
   delete(@Param('id') id: string) {
     return this.monitorsService.delete(id);
@@ -54,10 +64,29 @@ export class MonitorsController {
     @Param('id') id: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('status') status?: any,
   ) {
     const parsedLimit = limit ? parseInt(limit, 10) : 50;
     const parsedOffset = offset ? parseInt(offset, 10) : 0;
-    return this.monitorsService.getExecutions(id, parsedLimit, parsedOffset);
+    const fromDate = from ? new Date(from) : undefined;
+    const toDate = to ? new Date(to) : undefined;
+    return this.monitorsService.getExecutions(id, {
+      limit: parsedLimit,
+      offset: parsedOffset,
+      from: fromDate,
+      to: toDate,
+      status,
+    });
+  }
+
+  @Get(':id/executions/:executionId')
+  getExecutionById(
+    @Param('id') id: string,
+    @Param('executionId') executionId: string,
+  ) {
+    return this.monitorsService.getExecutionById(id, executionId);
   }
 
   @Post(':id/run')
