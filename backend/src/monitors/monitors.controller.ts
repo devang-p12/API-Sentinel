@@ -53,9 +53,11 @@ export class MonitorsController {
   getExecutions(
     @Param('id') id: string,
     @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
     const parsedLimit = limit ? parseInt(limit, 10) : 50;
-    return this.monitorsService.getExecutions(id, parsedLimit);
+    const parsedOffset = offset ? parseInt(offset, 10) : 0;
+    return this.monitorsService.getExecutions(id, parsedLimit, parsedOffset);
   }
 
   @Post(':id/run')

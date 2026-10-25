@@ -501,7 +501,60 @@ Introduce a discrete, normalized `Monitor` entity positioned strictly between `E
 - An API can have multiple environments (Development, Staging, Production), and each environment can independently host multiple distinct monitors.
 - CRUD operations for monitors are exposed via standard REST endpoints (`/monitors`, `/monitors/:id`).
 - Enabling/disabling a monitor is an immediate configuration toggle that will control whether background probe workers pick up the job without deleting historical telemetry.
+**Date:**
+2026-10-25
+
+---
+
+## ADR-018: Background Monitoring Pipeline via BullMQ, Redis, and Resilient Outbound Probing
+
+**Decision:**
+Implement all active HTTP health check executions asynchronously in a dedicated background worker pipeline powered by **Redis** and **BullMQ**, persisting immutable execution records in a dedicated `MonitorExecution` table. The API gateway never executes probe requests synchronously during HTTP request cycles. Manual "Run Now" actions and scheduled recurring probes enqueue lightweight job descriptors (`{ monitorId }`) that worker processes consume independently.
+
+**Reason:**
+- **Decoupling I/O Latency from API Handlers**: Network calls to arbitrary customer endpoints have non-deterministic response times (ranging from 5ms to 30,000ms on timeouts). Executing checks synchronously inside REST controllers (`POST /monitors` or `POST /monitors/:id/run`) would tie up HTTP request worker threads, exhaust connection pools, and block frontend clients.
+- **Durable Distributed Repeatable Scheduling**: BullMQ repeatable jobs (`repeat: { every: intervalMs }`) backed by Redis persist scheduling state across server restarts. In a clustered deployment, BullMQ prevents duplicate execution ticks across multiple worker replicas through Redis distributed locks.
+- **Configuration Freshness via ID-Only Job Payloads**: Enqueueing only `{ monitorId }` rather than the serialized monitor configuration guarantees that workers load the latest database state at execution time. If an administrator edits the endpoint, headers, or expected status code, subsequent ticks immediately apply the new configuration without requiring queue purging.
+- **Strict Worker Crash Immunity**: Network probes inevitably encounter DNS lookup failures (`ENOTFOUND`), connection resets (`ECONNRESET`), socket timeouts, or bad TLS certificates. The `HttpProbeService` intercepts all socket and network rejections and maps them into structured execution statuses without throwing unhandled exceptions that could crash the Node.js worker process.
+- **Granular Four-State Execution Model**:
+  - `SUCCESS`: The HTTP request completed within `timeoutMs` AND the returned status code matched `expectedStatusCode` (e.g. 200).
+  - `FAILED`: The HTTP request completed, but returned an unexpected status code (e.g. 500, 404, or 401).
+  - `TIMEOUT`: The target endpoint failed to reply within the monitor's configured timeout (aborted by `AbortController`).
+  - `ERROR`: Network-level failure prior to receiving an HTTP response (DNS failure, connection refused, TLS handshake failure).
+
+**Alternatives considered:**
+- *In-memory `setInterval()` / `setTimeout()`*:
+  - *Why rejected*: State is lost whenever the server process restarts or hot-reloads. Cannot be distributed across multiple containers without causing $N$-fold duplicate probes for every interval.
+- *Node-cron / OS crontab*:
+  - *Why rejected*: Lacks dynamic scheduling controls (adding/removing intervals per-monitor at runtime requires parsing crontabs). Does not provide concurrency throttles, dead-letter queues, or distributed coordination across container replicas.
+- *PostgreSQL Polling Loop (`SELECT * FROM monitors WHERE next_run <= NOW()`)*:
+  - *Why rejected*: Constant 1-second polling creates severe read lock contention and MVCC churn on the relational database as monitor count scales into thousands. Shifts queuing responsibilities to PostgreSQL, degrading dashboard responsiveness.
+- *BullMQ with Redis*:
+  - *Why accepted*: Battle-tested Redis-backed queue providing deterministic job deduplication (`jobId: monitor-${id}`), microsecond delay precision, concurrency limits, and clean separation between API server and worker nodes.
+
+**Tradeoff accepted:**
+- Requires Redis as a permanent infrastructure service alongside PostgreSQL.
+- Requires careful handling of BullMQ repeatable job key lifecycle to ensure inactive or deleted monitors are properly unscheduled (`removeRepeatableByKey`).
+
+**Worker Concurrency & Reliability Policy:**
+- Concurrency is throttled to 10 concurrent requests per worker instance to prevent outbound socket exhaustion and avoid unintentionally overwhelming target services.
+- Queue failures (e.g. Redis disconnect) are treated distinctly from target API failures. An HTTP 500 returned by a target service records a `FAILED` execution; it does NOT fail the BullMQ job or trigger infinite queue retries.
+
+**Security & SSRF Mitigation Strategy:**
+- **SSRF Risk**: Outbound probes make requests to URLs specified by users. In multi-tenant environments, malicious actors could configure monitors targeting internal cloud metadata endpoints (`http://169.254.169.254/latest/meta-data/`), internal services (`http://localhost:5432`, `http://10.0.0.1`), or private VPC endpoints.
+- **Mitigations Implemented & Planned**:
+  - URLs are strictly scoped to `Environment.baseUrl + Monitor.endpoint`.
+  - For local development and demonstration, private network access (`http://localhost:4000`) is permitted for the controlled Demo API.
+  - In production deployments, egress proxies or DNS rebind filters must restrict resolution of private RFC 1918 addresses and link-local cloud metadata IPs.
+- **Credential Protection**: Outbound probe headers (e.g. `Authorization: Bearer ...`) are never written to standard application logs or error messages.
+- **Telemetry Data Leak Prevention**: Full HTTP response bodies are never persisted to the `MonitorExecution` database table. Only `responseSize` (in bytes) and structured assertion diffs are recorded.
+
+**Consequences:**
+- The platform reliably executes health checks in the background without degrading the NestJS API server.
+- The UI can inspect actual execution history with precise response times and status codes.
+- Manual "Run Now" actions enqueue one-off jobs via `POST /monitors/:id/run` and immediately reflect results.
 
 **Date:**
 2026-10-25
+
 

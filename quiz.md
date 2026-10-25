@@ -342,6 +342,55 @@ and the request flow through the backend and frontend.
 
 ---
 
+## QUIZ — Monitoring Worker & MonitorExecution
+
+**Feature:**
+Monitoring Worker + Redis/BullMQ + MonitorExecution
+
+**Date:**
+2026-10-25
+
+**Status:**
+Stored for Learning & Review
+
+**Implementation Gate:**
+None (stored for review after implementation)
+
+**Purpose:**
+Understand background job scheduling, Redis/BullMQ queue mechanics, worker isolation, execution status categorization, and persistence.
+
+### Questions:
+
+1. Why should monitoring HTTP requests run in a background worker?
+
+2. What problem does Redis solve in this architecture?
+
+3. What problem does BullMQ solve?
+
+4. Why should a queue job contain monitorId instead of copying the entire Monitor configuration?
+
+5. What is the difference between a Monitor and a MonitorExecution?
+
+6. What happens when a monitored API returns HTTP 500 while the expected status is 200?
+
+7. What is the difference between FAILED, TIMEOUT, and ERROR?
+
+8. Why should one failed API request not crash the monitoring worker?
+
+9. Why should the Run Now button enqueue a job instead of performing the HTTP request directly from the API controller?
+
+10. Why should the response body generally not be stored in MonitorExecution?
+
+11. Why must recurring jobs avoid duplicate schedules?
+
+12. Trace a scheduled monitor execution from Redis/BullMQ to PostgreSQL.
+
+13. How will Prometheus eventually fit into this architecture?
+
+14. Why are MonitorExecution records important for historical analytics?
+
+---
+
 ## Historical Architecture Quizzes Archive
 
 ### Phase 1 & 2: Backend Architecture & Reliability Intelligence Archive

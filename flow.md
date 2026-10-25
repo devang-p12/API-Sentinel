@@ -865,5 +865,124 @@ NestJS MonitorsService.delete(id, organizationId?) (backend/src/monitors/monitor
 Returns HTTP 200 OK ──► Dialog closes ──► Item removed from list / navigates back to /monitors
 ```
 
+---
 
+## Flow: Monitoring Worker & MonitorExecution
 
+### 1. Scheduled Execution Flow
+
+```text
+BullMQ Scheduler (Redis repeatable job trigger)
+       │
+       ▼
+Redis (sentinel-redis / queue: monitor-execution-queue)
+       │
+       ▼
+BullMQ Worker: MonitorWorker.process(job: Job<{ monitorId: string }>)
+(backend/src/monitors/workers/monitor.worker.ts)
+       │
+       ▼
+MonitorExecutionService.execute(monitorId)
+(backend/src/monitors/services/monitor-execution.service.ts)
+       │
+       ├── 1. Load Monitor & Environment from PostgreSQL:
+       │      prisma.monitor.findUnique({
+       │        where: { id: monitorId },
+       │        include: { environment: true }
+       │      })
+       │      - Verifies monitor exists
+       │      - Verifies monitor.isActive === true (skips execution if disabled)
+       │
+       ├── 2. Build Target URL:
+       │      buildTargetUrl(environment.baseUrl, monitor.url)
+       │      (backend/src/monitors/utils/url.util.ts)
+       │      - Normalizes slashes cleanly (e.g. "http://localhost:4000" + "/healthy" -> "http://localhost:4000/healthy")
+       │      - Prevents double-slash collisions or missing leading slashes
+       │
+       ├── 3. Execute HTTP Outbound Probe:
+       │      HttpProbeService.probe({ url, method, headers, timeoutMs })
+       │      (backend/src/monitors/services/http-probe.service.ts)
+       │      - Initiates fetch() with AbortController for strict timeout enforcement
+       │      - Starts monotonic timer: t0 = performance.now()
+       │      - Receives response stream or intercepts socket abort/network error
+       │      - Stops monotonic timer: t1 = performance.now()
+       │      - Computes durationMs = Math.round(t1 - t0)
+       │      - Computes safe responseSize (content-length header or safely bounded buffer slice)
+       │
+       ├── 4. Evaluate Expected Status & Classify Execution:
+       │      - SUCCESS: Request completed without network error AND actual status === expectedStatus (e.g. 200 === 200)
+       │      - FAILED:  Request completed without network error BUT actual status !== expectedStatus (e.g. 500 !== 200)
+       │      - TIMEOUT: AbortController fired or socket timed out before server response completed (> timeoutMs)
+       │      - ERROR:   DNS resolution failure (ENOTFOUND), socket reset, connection refused (ECONNREFUSED), or malformed URL
+       │
+       └── 5. Persist MonitorExecution:
+              prisma.monitorExecution.create({
+                data: {
+                  monitorId: monitor.id,
+                  status: result.status,        // 'SUCCESS' | 'FAILED' | 'TIMEOUT' | 'ERROR'
+                  statusCode: result.statusCode,  // e.g. 200, 500, null
+                  responseTimeMs: result.responseTimeMs,
+                  responseSize: result.responseSize,
+                  errorMessage: result.errorMessage,
+                  executedAt: new Date()
+                }
+              })
+       │
+       ▼
+BullMQ Job completed acknowledged back to Redis
+```
+
+---
+
+### 2. Manual Execution Flow ("Run Now")
+
+```text
+React Monitor Detail Page (frontend/src/pages/MonitorDetailPage.tsx)
+       │
+       ▼  User clicks [Run Now] button
+api.runMonitorNow(id) (frontend/src/lib/api.ts)
+       │
+       ▼  HTTP POST /api/v1/monitors/:id/run
+NestJS MonitorsController.runNow(id)
+(backend/src/monitors/monitors.controller.ts)
+       │
+       ▼
+NestJS MonitorsService.runNow(id, organizationId?)
+(backend/src/monitors/monitors.service.ts)
+       │  1. Verifies monitor existence and tenant ownership
+       │
+       ▼
+MonitorSchedulerService.triggerManualRun(id)
+(backend/src/monitors/services/monitor-scheduler.service.ts)
+       │  Enqueues one-off execution job:
+       │  monitorQueue.add('monitor-execution-job', { monitorId: id }, {
+       │    jobId: `manual-run-${id}-${Date.now()}`,
+       │    removeOnComplete: true,
+       │    removeOnFail: 100
+       │  })
+       │
+       ▼
+Returns HTTP 200 OK: { success: true, message: "Execution queued" }
+       │
+       ▼
+Frontend UI updates [Run Now] state to "Running..." and begins polling
+api.getMonitorExecutions(id, 20, 0)
+       │
+       ▼
+Redis (monitor-execution-queue) delivers job to worker:
+MonitorWorker.process(job) (backend/src/monitors/workers/monitor.worker.ts)
+       │
+       ▼
+MonitorExecutionService.execute(monitorId)
+       │  Executes HTTP probe against target endpoint
+       │  Evaluates response against expectations
+       │  Writes new MonitorExecution record to PostgreSQL via Prisma
+       │
+       ▼
+Next frontend poll request (GET /api/v1/monitors/:id/executions)
+receives new execution record:
+       │
+       ▼
+Frontend renders new row in Recent Executions table with status badge,
+HTTP code, latency in ms, and timestamp. User can click row to inspect details.
+```

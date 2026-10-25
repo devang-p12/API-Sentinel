@@ -1,10 +1,18 @@
 import { useState, useEffect, useCallback } from "react"
 import { useParams, Link, useNavigate } from "react-router-dom"
-import { api, type Monitor } from "@/lib/api"
+import { api, type Monitor, type MonitorExecution } from "@/lib/api"
 import { PageContainer } from "@/components/layout/PageContainer"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   Activity01Icon,
@@ -12,9 +20,15 @@ import {
   Edit01Icon,
   Delete01Icon,
   ApiIcon,
+  PlayIcon,
+  ArrowRight01Icon,
 } from "@hugeicons/core-free-icons"
 import { MonitorFormDialog } from "@/components/monitors/MonitorFormDialog"
 import { DeleteMonitorDialog } from "@/components/monitors/DeleteMonitorDialog"
+import {
+  ExecutionDetailDialog,
+  getStatusBadgeVariant,
+} from "@/components/monitors/ExecutionDetailDialog"
 
 function getMethodBadgeClass(method: string) {
   switch (method.toUpperCase()) {
@@ -38,12 +52,29 @@ export function MonitorDetailPage() {
   const navigate = useNavigate()
 
   const [monitor, setMonitor] = useState<Monitor | null>(null)
+  const [executions, setExecutions] = useState<MonitorExecution[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isLoadingExecutions, setIsLoadingExecutions] = useState(false)
+  const [isRunningManual, setIsRunningManual] = useState(false)
+  const [manualRunMessage, setManualRunMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // Dialogs
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
+  const [selectedExecution, setSelectedExecution] = useState<MonitorExecution | null>(null)
+
+  const fetchExecutions = useCallback(async (monitorId: string) => {
+    try {
+      setIsLoadingExecutions(true)
+      const data = await api.getMonitorExecutions(monitorId, 30)
+      setExecutions(data)
+    } catch (err: any) {
+      console.warn("Could not load executions:", err.message)
+    } finally {
+      setIsLoadingExecutions(false)
+    }
+  }, [])
 
   const fetchMonitor = useCallback(async () => {
     if (!id) return
@@ -52,16 +83,26 @@ export function MonitorDetailPage() {
       setError(null)
       const data = await api.getMonitor(id)
       setMonitor(data)
+      await fetchExecutions(data.id)
     } catch (err: any) {
       setError(err?.message || "Failed to load monitor configuration.")
     } finally {
       setIsLoading(false)
     }
-  }, [id])
+  }, [id, fetchExecutions])
 
   useEffect(() => {
     fetchMonitor()
   }, [fetchMonitor])
+
+  // Periodic polling for execution updates while viewing the monitor (every 10s)
+  useEffect(() => {
+    if (!id) return
+    const interval = setInterval(() => {
+      fetchExecutions(id)
+    }, 10000)
+    return () => clearInterval(interval)
+  }, [id, fetchExecutions])
 
   const handleToggle = async () => {
     if (!monitor) return
@@ -71,6 +112,28 @@ export function MonitorDetailPage() {
       setMonitor((prev) => (prev ? { ...prev, isActive: updated.isActive } : null))
     } catch (err: any) {
       alert(err?.message || "Failed to toggle monitor status.")
+    }
+  }
+
+  const handleRunNow = async () => {
+    if (!monitor) return
+    try {
+      setIsRunningManual(true)
+      setManualRunMessage("Execution queued in BullMQ worker...")
+      await api.triggerMonitorRun(monitor.id)
+
+      // Refresh executions after worker picks up job
+      setTimeout(() => {
+        fetchExecutions(monitor.id)
+      }, 800)
+      setTimeout(() => {
+        fetchExecutions(monitor.id)
+        setManualRunMessage(null)
+        setIsRunningManual(false)
+      }, 2500)
+    } catch (err: any) {
+      setManualRunMessage(err?.message || "Failed to trigger run.")
+      setIsRunningManual(false)
     }
   }
 
@@ -169,7 +232,7 @@ export function MonitorDetailPage() {
         { label: monitor.name },
       ]}
       action={
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Link
             to="/monitors"
             className={buttonVariants({ variant: "outline", size: "sm", className: "gap-1.5" })}
@@ -177,6 +240,16 @@ export function MonitorDetailPage() {
             <HugeiconsIcon icon={ArrowLeft01Icon} className="size-3.5" />
             <span>Back to Monitors</span>
           </Link>
+
+          <Button
+            size="sm"
+            onClick={handleRunNow}
+            disabled={isRunningManual}
+            className="gap-1.5 font-medium"
+          >
+            <HugeiconsIcon icon={PlayIcon} className="size-3.5" />
+            <span>{isRunningManual ? "Queuing..." : "Run Now"}</span>
+          </Button>
 
           <Button
             size="sm"
@@ -210,6 +283,14 @@ export function MonitorDetailPage() {
       }
     >
       <div className="space-y-6">
+        {/* Manual Run Notification Banner */}
+        {manualRunMessage && (
+          <div className="p-3 bg-primary/10 border border-primary/20 text-primary text-xs font-mono flex items-center justify-between animate-in fade-in-50">
+            <span>{manualRunMessage}</span>
+            <span className="text-[10px] text-muted-foreground">Polling latest runs...</span>
+          </div>
+        )}
+
         {/* Configuration Summary Card */}
         <Card className="rounded-none border-border">
           <CardHeader className="py-3 px-4 border-b border-border bg-muted/20">
@@ -321,31 +402,135 @@ export function MonitorDetailPage() {
                   <span>{monitor.url}</span>
                 </div>
                 <div>
-                  <span className="text-foreground font-medium">Created: </span>
-                  <span>{new Date(monitor.createdAt).toLocaleString()}</span>
+                  <span className="text-foreground font-medium">Engine: </span>
+                  <span>BullMQ + Redis Worker</span>
                 </div>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Clear Empty State for Monitor Executions */}
-        <Card className="rounded-none border-border border-dashed bg-card/30">
-          <CardContent className="py-14 px-6 flex flex-col items-center justify-center text-center space-y-3">
-            <div className="size-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
-              <HugeiconsIcon icon={Activity01Icon} className="size-5" />
+        {/* Recent Executions History Card */}
+        <Card className="rounded-none border-border">
+          <CardHeader className="py-3 px-4 border-b border-border bg-muted/20">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-sm font-semibold">Recent Executions</CardTitle>
+                <CardDescription className="text-xs">
+                  Immutable health check history recorded by the background monitoring worker.
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => fetchExecutions(monitor.id)}
+                  disabled={isLoadingExecutions}
+                  className="font-mono text-[11px]"
+                >
+                  {isLoadingExecutions ? "Refreshing..." : "Refresh"}
+                </Button>
+              </div>
             </div>
-            <div className="space-y-1.5 max-w-md">
-              <h3 className="text-sm font-semibold text-foreground">
-                No monitoring executions yet.
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                Monitoring results will appear here once the monitoring worker is enabled.
-              </p>
-            </div>
-            <div className="text-[11px] font-mono text-muted-foreground border border-border bg-muted/20 px-3 py-1.5 max-w-md">
-              Note: A Monitor defines the desired probe configuration. Actual execution telemetry is recorded by the background monitoring worker in the next phase.
-            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {isLoadingExecutions && executions.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted-foreground">
+                Loading execution telemetry...
+              </div>
+            ) : executions.length === 0 ? (
+              <div className="py-12 px-6 flex flex-col items-center justify-center text-center space-y-3">
+                <div className="size-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
+                  <HugeiconsIcon icon={Activity01Icon} className="size-5" />
+                </div>
+                <div className="space-y-1 max-w-md">
+                  <h4 className="text-xs font-semibold text-foreground">
+                    No Executions Recorded Yet
+                  </h4>
+                  <p className="text-xs text-muted-foreground">
+                    This monitor is scheduled to run every {monitor.intervalSeconds}s. Click "Run Now" above to trigger an immediate check.
+                  </p>
+                </div>
+                <Button size="xs" onClick={handleRunNow} disabled={isRunningManual} className="gap-1 mt-2">
+                  <HugeiconsIcon icon={PlayIcon} className="size-3" />
+                  <span>Execute First Probe</span>
+                </Button>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="text-xs font-semibold">Executed At</TableHead>
+                    <TableHead className="text-xs font-semibold">Status</TableHead>
+                    <TableHead className="text-xs font-semibold">HTTP Code</TableHead>
+                    <TableHead className="text-xs font-semibold">Response Time</TableHead>
+                    <TableHead className="text-xs font-semibold">Size</TableHead>
+                    <TableHead className="text-xs font-semibold">Summary / Error</TableHead>
+                    <TableHead className="text-xs font-semibold text-right">Details</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {executions.map((exec) => (
+                    <TableRow key={exec.id} className="hover:bg-muted/30">
+                      <TableCell className="py-2.5 font-mono text-xs text-muted-foreground">
+                        {new Date(exec.executedAt).toLocaleTimeString()}
+                      </TableCell>
+
+                      <TableCell className="py-2.5">
+                        <Badge
+                          variant="outline"
+                          className={`font-mono text-[10px] font-bold ${getStatusBadgeVariant(
+                            exec.status
+                          )}`}
+                        >
+                          {exec.status}
+                        </Badge>
+                      </TableCell>
+
+                      <TableCell className="py-2.5 font-mono text-xs font-medium text-foreground">
+                        {exec.statusCode !== null ? (
+                          <span>{exec.statusCode}</span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+
+                      <TableCell className="py-2.5 font-mono text-xs text-foreground">
+                        {exec.responseTimeMs} ms
+                      </TableCell>
+
+                      <TableCell className="py-2.5 font-mono text-xs text-muted-foreground">
+                        {exec.responseSize !== null ? `${exec.responseSize} B` : "—"}
+                      </TableCell>
+
+                      <TableCell className="py-2.5 text-xs">
+                        {exec.errorMessage ? (
+                          <span className="text-destructive font-mono text-[11px] line-clamp-1 max-w-xs">
+                            {exec.errorMessage}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground text-[11px]">
+                            HTTP {exec.statusCode} OK
+                          </span>
+                        )}
+                      </TableCell>
+
+                      <TableCell className="py-2.5 text-right">
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          onClick={() => setSelectedExecution(exec)}
+                          className="gap-1 font-mono text-[11px]"
+                        >
+                          <span>Inspect</span>
+                          <HugeiconsIcon icon={ArrowRight01Icon} className="size-3" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -365,6 +550,14 @@ export function MonitorDetailPage() {
         monitorName={monitor.name}
         monitorId={monitor.id}
         onConfirm={handleDeleteConfirm}
+      />
+
+      {/* Execution Telemetry Detail Dialog */}
+      <ExecutionDetailDialog
+        open={Boolean(selectedExecution)}
+        onOpenChange={(open) => !open && setSelectedExecution(null)}
+        execution={selectedExecution}
+        monitorName={monitor.name}
       />
     </PageContainer>
   )

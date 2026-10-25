@@ -334,9 +334,14 @@ export class MonitorsService {
     return updated;
   }
 
-  async getExecutions(id: string, limit: number = 50, organizationId?: string) {
+  async getExecutions(
+    id: string,
+    limit: number = 50,
+    offset: number = 0,
+    organizationId?: string,
+  ) {
     await this.findOne(id, organizationId);
-    return this.executionService.getRecentExecutions(id, limit);
+    return this.executionService.getRecentExecutions(id, limit, offset);
   }
 
   async triggerManualRun(id: string, organizationId?: string) {

@@ -35,11 +35,12 @@ export class MonitorExecutionService {
     }
   }
 
-  async getRecentExecutions(monitorId: string, limit: number = 50) {
+  async getRecentExecutions(monitorId: string, limit: number = 50, offset: number = 0) {
     return this.prisma.monitorExecution.findMany({
       where: { monitorId },
       orderBy: { executedAt: 'desc' },
       take: limit,
+      skip: offset,
     });
   }
 }
