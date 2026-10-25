@@ -7,6 +7,7 @@ import { EnvironmentsModule } from './environments/environments.module';
 import { MonitorsModule } from './monitors/monitors.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { AlertsModule } from './alerts/alerts.module';
+import { AlertRulesModule } from './alert-rules/alert-rules.module';
 import { IncidentsModule } from './incidents/incidents.module';
 import { DashboardsModule } from './dashboards/dashboards.module';
 import { BootstrapService } from './common/bootstrap.service';
@@ -21,6 +22,7 @@ import { BootstrapService } from './common/bootstrap.service';
     MonitorsModule,
     AnalyticsModule,
     AlertsModule,
+    AlertRulesModule,
     IncidentsModule,
     DashboardsModule,
   ],

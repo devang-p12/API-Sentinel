@@ -1575,5 +1575,124 @@ frontend/src/components/dashboards/renderers/WidgetRenderer.tsx
    - Auto-refresh timer periodically re-fetches telemetry without full browser reloads
 ```
 
+---
+
+## 9. Phase 5A: Production-Grade Alert Engine Execution & Lifecycle Flow
+
+### Flow 9.1: End-to-End Real-Time Alert Evaluation Flow
+
+```text
+Monitor Probe Executed (BullMQ Worker or Manual Probe)
+      │
+      ▼
+MonitorExecutionService.executeMonitor() (backend/src/monitors/services/monitor-execution.service.ts)
+      │  Records MonitorExecution row in PostgreSQL
+      │  Triggers alert evaluation hook:
+      │  await this.alertEvaluator.evaluateRulesForMonitor(monitor.id);
+      ▼
+AlertEvaluationService.evaluateRulesForMonitor(monitorId) (backend/src/alert-rules/services/alert-evaluation.service.ts)
+      │  Finds all enabled AlertRules scoped to this monitor/API/project
+      │  Iterates over matching rules and evaluates each:
+      ▼
+AlertEvaluationService.evaluateRule(rule, now)
+      │
+      ├── 1. Query Metric Layer:
+      │      windowMs = max(rule.duration * 2, 5m)
+      │      metricResult = await MetricQueryService.query({
+      │        metric: rule.metric,
+      │        filters: { projectId, apiId, environmentId, monitorId },
+      │        from: now - windowMs,
+      │        to: now
+      │      })
+      │      metricValue = metricResult.summary.current
+      │
+      ├── 2. Generate Deterministic Fingerprint:
+      │      fingerprint = SHA256(ruleId + apiId + envId + monitorId + sortedLabels)
+      │
+      └── 3. Serialized Transaction Execution (PostgreSQL Advisory Lock):
+             prisma.$transaction(async (tx) => {
+               // Acquire transaction-level advisory lock to eliminate race conditions
+               await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', fingerprint);
+
+               // Find active instance matching fingerprint
+               activeInstance = await tx.alertInstance.findFirst({
+                 where: { fingerprint, status: { in: ['PENDING', 'FIRING'] } },
+                 orderBy: { createdAt: 'desc' }
+               });
+               previousState = activeInstance ? activeInstance.status : 'NORMAL';
+
+               // Evaluate threshold condition (GREATER_THAN, LESS_THAN, etc.)
+               conditionMet = stateMachine.evaluateCondition(metricValue, rule.condition, rule.threshold);
+
+               // Compute state transition:
+               // NORMAL + true  ──► PENDING (record pendingSince = now)
+               // PENDING + true ──► if (elapsed >= duration) FIRING else PENDING
+               // PENDING + false ──► RESOLVED (spike avoided)
+               // FIRING + true  ──► FIRING
+               // FIRING + false ──► RESOLVED (recovered! record resolvedAt = now)
+               transition = stateMachine.computeTransition({ conditionMet, currentState: previousState, ... });
+
+               // Persist AlertInstance:
+               if (transition.shouldCreateInstance && !activeInstance) {
+                 created = await tx.alertInstance.create({ ... });
+               } else if (activeInstance) {
+                 updated = await tx.alertInstance.update({ ... });
+               }
+
+               // Append point-in-time audit history:
+               await tx.alertEvaluation.create({
+                 data: {
+                   alertRuleId: rule.id,
+                   alertInstanceId: savedInstanceId,
+                   value: metricValue,
+                   threshold: rule.threshold,
+                   conditionMet,
+                   stateBefore: previousState,
+                   stateAfter: transition.newState,
+                   evaluatedAt: now
+                 }
+               });
+             });
+```
+
+### Flow 9.2: Periodic Sweeper & BullMQ Worker Evaluation Flow
+
+```text
+AlertSchedulerService (backend/src/alert-rules/scheduler/alert-scheduler.service.ts)
+      │  Adds repeatable BullMQ job every 30s:
+      │  queue.add('sweep-all-rules', {}, { repeat: { every: 30000 } })
+      ▼
+AlertEvaluationWorker (backend/src/alert-rules/workers/alert-evaluation.worker.ts)
+      │  Picks up 'sweep-all-rules' or 'evaluate-rule'
+      │  Calls AlertEvaluationService.evaluateAllEnabledRules()
+      ▼
+Determines rules due for evaluation based on rule.evaluationInterval
+      │
+      ▼
+Executes AlertEvaluationService.evaluateRule() under advisory locks
+```
+
+### Flow 9.3: Frontend Dashboard to Alert Creation Flow
+
+```text
+User hovers on Dashboard Widget (e.g. "Payment API Latency")
+      │  Clicks "Create alert" in widget footer or panel actions menu
+      ▼
+frontend/src/pages/DashboardViewPage.tsx -> handleCreateAlertFromWidget(widget)
+      │  Extracts widget.metric, widget.configuration.apiId, environmentId, monitorId
+      │  Populates draft: { name: "Payment API Latency Alert", metric, apiId, environmentId }
+      │  Opens <CreateAlertRuleSheet />
+      ▼
+frontend/src/components/alerts/CreateAlertRuleSheet.tsx
+      │  Displays pre-populated condition builder:
+      │  WHEN [p95_latency] IS [Is Above (>)] VALUE [1000] ms FOR [2 minutes]
+      │  User customizes interval, severity, labels -> clicks "Create Alert Rule"
+      ▼
+api.createAlertRule() ──► POST /api/v1/alert-rules
+      │
+      ▼
+AlertRule is saved to PostgreSQL and immediately scheduled for continuous evaluation!
+```
+
 
 

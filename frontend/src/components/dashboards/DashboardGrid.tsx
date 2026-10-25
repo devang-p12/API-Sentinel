@@ -16,6 +16,7 @@ import {
   ArrowDown01Icon,
   DragDropIcon,
   Add01Icon,
+  AlertCircleIcon,
 } from '@hugeicons/core-free-icons';
 
 interface DashboardGridProps {
@@ -27,6 +28,7 @@ interface DashboardGridProps {
   onDuplicateWidget: (widget: DashboardWidget) => void;
   onUpdateLayout: (updatedWidgets: DashboardWidget[]) => void;
   onAddVisualization: () => void;
+  onCreateAlert?: (widget: DashboardWidget) => void;
 }
 
 export function DashboardGrid({
@@ -38,6 +40,7 @@ export function DashboardGrid({
   onDuplicateWidget,
   onUpdateLayout,
   onAddVisualization,
+  onCreateAlert,
 }: DashboardGridProps) {
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [draggedWidgetId, setDraggedWidgetId] = useState<string | null>(null);
@@ -565,6 +568,20 @@ export function DashboardGrid({
                           <span>Duplicate</span>
                         </button>
 
+                        {onCreateAlert && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveMenuId(null);
+                              onCreateAlert(widget);
+                            }}
+                            className="w-full text-left px-2 py-1.5 hover:bg-amber-500/10 text-amber-500 flex items-center gap-2"
+                          >
+                            <HugeiconsIcon icon={AlertCircleIcon} className="size-3.5" />
+                            <span>Create Alert</span>
+                          </button>
+                        )}
+
                         {isEditMode && (
                           <>
                             <div className="border-t border-border/50 my-1" />
@@ -614,6 +631,22 @@ export function DashboardGrid({
                   </div>
                 ) : (
                   <WidgetRenderer widget={widget} isLoading={isLoading} />
+                )}
+
+                {/* Widget Footer: Metric & Create Alert trigger */}
+                {!isEditMode && onCreateAlert && (
+                  <div className="border-t border-border/40 px-2.5 py-1 bg-muted/10 flex items-center justify-between text-[10px] text-muted-foreground mt-auto">
+                    <span className="font-mono text-[9px] truncate opacity-70">{widget.metric}</span>
+                    <button
+                      type="button"
+                      onClick={() => onCreateAlert(widget)}
+                      className="flex items-center gap-1 hover:text-amber-500 transition-colors font-medium text-[10px]"
+                      title="Create an alert rule based on this widget's metric and filters"
+                    >
+                      <HugeiconsIcon icon={AlertCircleIcon} className="size-2.5 text-amber-500" />
+                      <span>Create alert</span>
+                    </button>
+                  </div>
                 )}
 
                 {/* Right-edge draggable arrow resize handle in edit mode */}

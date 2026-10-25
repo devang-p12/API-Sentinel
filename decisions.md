@@ -806,6 +806,57 @@ DashboardWidget (Stat, TimeSeries, Bar, Gauge, Table)
 **Date:**
 2026-10-26
 
+---
 
+## ADR-024: Production-Grade Stateful Alert Engine, Deduplication Fingerprints, Pending Grace Windows, and Advisory Locking
 
+**Context & Problem Statement:**
+In previous phases, Sentinel established the synthetic monitoring worker, PostgreSQL `MonitorExecution` historical records, and the `MetricQueryService` custom dashboard layer. However, Sentinel remained a passive monitoring platform: it recorded metrics, but could not proactively detect threshold violations or maintain lifecycle alert states. We needed to transform Sentinel into an active observability platform without implementing a simplistic and noisy `if metric > threshold then alert` approach.
 
+**Decision:**
+Implement **Phase 5A: Production-Grade Alert Engine** with the following foundational architectural design choices:
+
+1. **Separation of `AlertRule` and `AlertInstance`:**
+   - **`AlertRule` (Definition)**: Defines *intent* — what metric to query, which project/API/environment/monitor scope it targets, what threshold operator to check, what pending duration window to enforce, evaluation frequency, severity, and labels.
+   - **`AlertInstance` (State Lifecycle)**: Represents a *concrete, physical occurrence* of an alert rule violating its condition on a specific set of dimensions at a specific time.
+   - *Why Separate*: An alert rule is static configuration created once by an engineer. An alert instance is dynamic and ephemeral; a single rule can produce multiple distinct instances over time (e.g. firing today for 10 minutes, resolving, and firing next week). Conflating the rule and its active state violates relational modeling, breaks historical auditability, and causes race conditions when multiple environments match a wildcard rule.
+
+2. **Persistence of Alert State (`NORMAL`, `PENDING`, `FIRING`, `RESOLVED`):**
+   - Alert state is maintained explicitly in PostgreSQL rather than calculated purely in-memory.
+   - *Why Persisted*: In-memory alerting fails across worker process restarts, server crashes, rolling deployments, and multi-container scaling. Persisting state in PostgreSQL ensures that if Worker A marks an alert `PENDING`, Worker B (or the API server) can inspect `pendingSince` on subsequent ticks and reliably determine whether the FOR duration has elapsed. Furthermore, when an alert resolves, its record is preserved with `resolvedAt` and duration calculations for post-incident review.
+
+3. **Immutable `AlertEvaluation` History:**
+   - On every evaluation tick, an `AlertEvaluation` record is written capturing `value`, `threshold`, `conditionMet`, `stateBefore`, `stateAfter`, and `evaluatedAt`.
+   - *Why History Exists*: Observability engineers need to answer: *"Why did this alert fire?"* and *"Why did it resolve?"*. Evaluation history provides deterministic proof of telemetry values over time, showing the exact metric readings that pushed an alert through `NORMAL -> PENDING -> FIRING -> RESOLVED`.
+
+4. **Deterministic Deduplication Fingerprints:**
+   - Every violation computes a deterministic SHA-256 hash:
+     ```text
+     fingerprint = hash(ruleId + apiId + environmentId + monitorId + sortedLabels)
+     ```
+   - *Why Fingerprints*: Without fingerprint deduplication, a rule evaluated every 30 seconds during a 10-minute outage would spawn 20 duplicate firing alert instances. Fingerprints ensure Sentinel finds the existing active instance (`status IN ['PENDING', 'FIRING']`) and updates its current reading rather than creating duplicates.
+
+5. **Configurable `FOR` / Pending Grace Window:**
+   - A rule only transitions from `PENDING` to `FIRING` when `now - pendingSince >= durationSeconds`.
+   - *Why FOR Windows*: Transient latency spikes and single dropped packets are common in cloud networking. Firing immediately on every threshold crossing causes extreme alert fatigue. The pending window ensures alerts only fire when violations are sustained, while resolving cleanly if transient spikes clear before the duration is reached.
+
+6. **PostgreSQL Advisory Locks for Concurrency Safety:**
+   - Evaluator transactions execute `SELECT pg_advisory_xact_lock(hashtext(fingerprint))` before querying or updating alert instances.
+   - *Why Advisory Locks*: When multiple background workers or incoming monitor executions evaluate the same monitor simultaneously, application-level checks allow race conditions where two workers concurrently see no active instance and insert duplicate records. Advisory transaction locks serialize execution for the same fingerprint at the database engine level, with zero Redis dependency and automatic lock release on commit/rollback.
+
+7. **Zero Duplicate Metric Calculations:**
+   - The alert engine queries the existing `MetricQueryService` directly.
+   - *Why Reuse*: Calculating percentiles, error rates, and availability inside the alert worker would duplicate formulas and produce discrepancies between what the dashboard displays and what alerts trigger on. Both consumers share the exact same underlying metric logic.
+
+8. **Scope Boundary: Deferring Incident Engine (Phase 5B) and Notification Routing (Phase 6):**
+   - Notification channels (Email, Slack, Webhooks, PagerDuty), contact points, and notification policies are strictly excluded from Phase 5A.
+   - *Why Deferred*: Mature observability systems (Grafana Alerting, Prometheus/Alertmanager, Datadog) strictly decouple *Alert Evaluation* (discovering violations and maintaining state) from *Incident Management* (grouping related alerts) and *Notification Routing* (formatting and dispatching to channels). Coupling notification dispatch directly into evaluation loops causes cascading timeouts, rate limiting by webhook providers, and noisy, un-grouped message blasts.
+
+**Consequences:**
+- Sentinel possesses a rock-solid, stateful alerting foundation.
+- No duplicate firing alerts occur for the same issue.
+- Evaluation history provides complete visibility into metric state transitions.
+- Phase 5B (Incident Engine) and Phase 6 (Notification Policies) can cleanly consume `AlertInstance` states without redesigning the core engine.
+
+**Date:**
+2026-10-26

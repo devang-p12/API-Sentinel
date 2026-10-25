@@ -80,6 +80,79 @@ export interface Incident {
   };
 }
 
+export type AlertCondition =
+  | 'GREATER_THAN'
+  | 'GREATER_THAN_OR_EQUAL'
+  | 'LESS_THAN'
+  | 'LESS_THAN_OR_EQUAL'
+  | 'EQUAL'
+  | 'NOT_EQUAL';
+
+export type AlertState = 'NORMAL' | 'PENDING' | 'FIRING' | 'RESOLVED';
+export type AlertSeverity = 'INFO' | 'WARNING' | 'HIGH' | 'CRITICAL';
+
+export interface AlertRule {
+  id: string;
+  name: string;
+  description?: string | null;
+  projectId: string;
+  project?: { id: string; name: string };
+  metric: string;
+  apiId?: string | null;
+  api?: { id: string; name: string } | null;
+  environmentId?: string | null;
+  environment?: { id: string; name: string } | null;
+  monitorId?: string | null;
+  monitor?: { id: string; name: string } | null;
+  condition: AlertCondition;
+  threshold: number;
+  duration: number; // in seconds
+  evaluationInterval: number; // in seconds
+  severity: AlertSeverity;
+  labels?: Record<string, any> | null;
+  enabled: boolean;
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  _count?: { instances: number; evaluations: number };
+}
+
+export interface AlertEvaluation {
+  id: string;
+  alertRuleId: string;
+  alertInstanceId?: string | null;
+  value: number | null;
+  threshold: number;
+  conditionMet: boolean;
+  stateBefore: AlertState;
+  stateAfter: AlertState;
+  evaluatedAt: string;
+}
+
+export interface AlertInstance {
+  id: string;
+  alertRuleId: string;
+  alertRule: AlertRule;
+  fingerprint: string;
+  status: AlertState;
+  currentValue: number | null;
+  threshold: number;
+  pendingSince?: string | null;
+  startedAt?: string | null;
+  lastEvaluatedAt: string;
+  resolvedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  evaluations?: AlertEvaluation[];
+}
+
+export interface AlertSummary {
+  firing: number;
+  pending: number;
+  resolved: number;
+  total: number;
+}
+
 export interface MonitorAnalyticsSummary {
   monitorId: string;
   monitorName: string;
@@ -459,4 +532,96 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ layout }),
     }),
+
+  // Alert Rules & Engine APIs (Phase 5A)
+  getAlertRules: (query?: {
+    projectId?: string;
+    apiId?: string;
+    environmentId?: string;
+    monitorId?: string;
+    metric?: string;
+    enabled?: boolean;
+  }) => {
+    const params = new URLSearchParams();
+    if (query?.projectId) params.set('projectId', query.projectId);
+    if (query?.apiId) params.set('apiId', query.apiId);
+    if (query?.environmentId) params.set('environmentId', query.environmentId);
+    if (query?.monitorId) params.set('monitorId', query.monitorId);
+    if (query?.metric) params.set('metric', query.metric);
+    if (query?.enabled !== undefined) params.set('enabled', String(query.enabled));
+    const qs = params.toString();
+    return fetchJson<AlertRule[]>(`/alert-rules${qs ? `?${qs}` : ''}`);
+  },
+  getAlertRule: (id: string) => fetchJson<AlertRule>(`/alert-rules/${id}`),
+  createAlertRule: (data: Partial<AlertRule>) =>
+    fetchJson<AlertRule>('/alert-rules', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateAlertRule: (id: string, data: Partial<AlertRule>) =>
+    fetchJson<AlertRule>(`/alert-rules/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteAlertRule: (id: string) =>
+    fetchJson<{ id: string }>(`/alert-rules/${id}`, {
+      method: 'DELETE',
+    }),
+  enableAlertRule: (id: string) =>
+    fetchJson<AlertRule>(`/alert-rules/${id}/enable`, {
+      method: 'POST',
+    }),
+  disableAlertRule: (id: string) =>
+    fetchJson<AlertRule>(`/alert-rules/${id}/disable`, {
+      method: 'POST',
+    }),
+  testAlertRule: (id: string) =>
+    fetchJson<{
+      metric: string;
+      currentValue: number | null;
+      condition: string;
+      threshold: number;
+      conditionMet: boolean;
+      wouldTransitionTo: AlertState;
+    }>(`/alert-rules/${id}/test`, {
+      method: 'POST',
+    }),
+
+  // Alert Instances APIs (Section 20)
+  getAlerts: (query?: {
+    projectId?: string;
+    apiId?: string;
+    environmentId?: string;
+    monitorId?: string;
+    alertRuleId?: string;
+    status?: AlertState;
+    severity?: AlertSeverity;
+    from?: string;
+    to?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (query?.projectId) params.set('projectId', query.projectId);
+    if (query?.apiId) params.set('apiId', query.apiId);
+    if (query?.environmentId) params.set('environmentId', query.environmentId);
+    if (query?.monitorId) params.set('monitorId', query.monitorId);
+    if (query?.alertRuleId) params.set('alertRuleId', query.alertRuleId);
+    if (query?.status) params.set('status', query.status);
+    if (query?.severity) params.set('severity', query.severity);
+    if (query?.from) params.set('from', query.from);
+    if (query?.to) params.set('to', query.to);
+    if (query?.limit) params.set('limit', String(query.limit));
+    if (query?.offset) params.set('offset', String(query.offset));
+    const qs = params.toString();
+    return fetchJson<{ items: AlertInstance[]; total: number; limit: number; offset: number }>(
+      `/alerts${qs ? `?${qs}` : ''}`,
+    );
+  },
+  getAlertSummary: (projectId?: string) => {
+    const qs = projectId ? `?projectId=${projectId}` : '';
+    return fetchJson<AlertSummary>(`/alerts/summary${qs}`);
+  },
+  getAlertInstance: (id: string) => fetchJson<AlertInstance>(`/alerts/${id}`),
+  getAlertEvaluations: (id: string) => fetchJson<AlertEvaluation[]>(`/alerts/${id}/evaluations`),
 };

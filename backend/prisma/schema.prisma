@@ -44,7 +44,24 @@ enum IncidentStatus {
 enum AlertSeverity {
   INFO
   WARNING
+  HIGH
   CRITICAL
+}
+
+enum AlertCondition {
+  GREATER_THAN
+  GREATER_THAN_OR_EQUAL
+  LESS_THAN
+  LESS_THAN_OR_EQUAL
+  EQUAL
+  NOT_EQUAL
+}
+
+enum AlertState {
+  NORMAL
+  PENDING
+  FIRING
+  RESOLVED
 }
 
 // -------------------------------------------------------------
@@ -91,6 +108,7 @@ model Project {
 
   apis       Api[]
   dashboards Dashboard[]
+  alertRules AlertRule[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -107,6 +125,7 @@ model Api {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   environments Environment[]
+  alertRules   AlertRule[]
 
   @@unique([projectId, name])
   @@index([projectId])
@@ -114,16 +133,17 @@ model Api {
 }
 
 model Environment {
-  id          String   @id @default(uuid())
-  name        String   // e.g. "production", "staging", "development"
-  baseUrl     String?  @map("base_url") // e.g. "http://localhost:4000"
-  variables   Json?    @default("{}") // Environment-level headers/auth tokens
-  apiId       String   @map("api_id")
-  api         Api      @relation(fields: [apiId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id        String   @id @default(uuid())
+  name      String // e.g. "production", "staging", "development"
+  baseUrl   String?  @map("base_url") // e.g. "http://localhost:4000"
+  variables Json?    @default("{}") // Environment-level headers/auth tokens
+  apiId     String   @map("api_id")
+  api       Api      @relation(fields: [apiId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  monitors Monitor[]
+  monitors   Monitor[]
+  alertRules AlertRule[]
 
   @@unique([apiId, name])
   @@index([apiId])
@@ -135,24 +155,25 @@ model Monitor {
   name            String
   description     String?
   method          HttpMethod @default(GET)
-  url             String     // Path (e.g. "/healthy") or full URL
+  url             String // Path (e.g. "/healthy") or full URL
   headers         Json?      @default("{}") // Request headers
-  body            String?    // Request payload (for POST/PUT)
+  body            String? // Request payload (for POST/PUT)
   intervalSeconds Int        @default(60) @map("interval_seconds") // Frequency
   timeoutMs       Int        @default(10000) @map("timeout_ms") // Max wait time
   isActive        Boolean    @default(true) @map("is_active")
-  
+
   // Assertions: e.g. [{ "type": "statusCode", "operator": "equals", "value": 200 }]
-  assertions      Json?      @default("[]")
+  assertions Json? @default("[]")
 
-  environmentId   String      @map("environment_id")
-  environment     Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  environmentId String      @map("environment_id")
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 
-  createdAt       DateTime    @default(now()) @map("created_at")
-  updatedAt       DateTime    @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   executions MonitorExecution[]
   alerts     Alert[]
+  alertRules AlertRule[]
 
   @@index([environmentId])
   @@index([isActive])
@@ -178,15 +199,15 @@ model MonitorExecution {
 }
 
 model Alert {
-  id             String        @id @default(uuid())
-  name           String
-  severity       AlertSeverity @default(WARNING)
-  condition      Json
-  isEnabled      Boolean       @default(true) @map("is_enabled")
-  monitorId      String        @map("monitor_id")
-  monitor        Monitor       @relation(fields: [monitorId], references: [id], onDelete: Cascade)
-  createdAt      DateTime      @default(now()) @map("created_at")
-  updatedAt      DateTime      @updatedAt @map("updated_at")
+  id        String        @id @default(uuid())
+  name      String
+  severity  AlertSeverity @default(WARNING)
+  condition Json
+  isEnabled Boolean       @default(true) @map("is_enabled")
+  monitorId String        @map("monitor_id")
+  monitor   Monitor       @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
 
   incidents Incident[]
 
@@ -195,13 +216,13 @@ model Alert {
 }
 
 model Incident {
-  id           String         @id @default(uuid())
-  status       IncidentStatus @default(TRIGGERED)
-  summary      String
-  startedAt    DateTime       @default(now()) @map("started_at")
-  resolvedAt   DateTime?      @map("resolved_at")
-  alertId      String         @map("alert_id")
-  alert        Alert          @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  id         String         @id @default(uuid())
+  status     IncidentStatus @default(TRIGGERED)
+  summary    String
+  startedAt  DateTime       @default(now()) @map("started_at")
+  resolvedAt DateTime?      @map("resolved_at")
+  alertId    String         @map("alert_id")
+  alert      Alert          @relation(fields: [alertId], references: [id], onDelete: Cascade)
 
   @@index([alertId, status])
   @@map("incidents")
@@ -217,7 +238,7 @@ model Dashboard {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  widgets     DashboardWidget[]
+  widgets DashboardWidget[]
 
   @@unique([projectId, name])
   @@index([projectId])
@@ -229,19 +250,96 @@ model DashboardWidget {
   dashboardId       String    @map("dashboard_id")
   dashboard         Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
   title             String
-  metric            String    // Stable metric key, e.g. "p95_latency", "availability"
+  metric            String // Stable metric key, e.g. "p95_latency", "availability"
   visualizationType String    @map("visualization_type") // "stat", "time_series", "bar", "table", "gauge"
   configuration     Json      @default("{}") // filters: { apiId, environmentId, monitorId }, aggregation, etc.
-  
-  // Grid layout positioning
-  x                 Int       @default(0)
-  y                 Int       @default(0)
-  width             Int       @default(6) // 1-12 columns
-  height            Int       @default(3) // grid rows
 
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
+  // Grid layout positioning
+  x      Int @default(0)
+  y      Int @default(0)
+  width  Int @default(6) // 1-12 columns
+  height Int @default(3) // grid rows
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([dashboardId])
   @@map("dashboard_widgets")
+}
+
+model AlertRule {
+  id                 String         @id @default(uuid())
+  name               String
+  description        String?
+  projectId          String         @map("project_id")
+  project            Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  metric             String // e.g. "p95_latency", "error_rate", "availability"
+  apiId              String?        @map("api_id")
+  api                Api?           @relation(fields: [apiId], references: [id], onDelete: SetNull)
+  environmentId      String?        @map("environment_id")
+  environment        Environment?   @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  monitorId          String?        @map("monitor_id")
+  monitor            Monitor?       @relation(fields: [monitorId], references: [id], onDelete: SetNull)
+  condition          AlertCondition
+  threshold          Float
+  duration           Int            @default(0) // FOR duration in seconds (0 = immediate)
+  evaluationInterval Int            @default(60) @map("evaluation_interval") // in seconds
+  severity           AlertSeverity  @default(WARNING)
+  labels             Json?          @default("{}") // e.g. { team: "backend", service: "payments" }
+  enabled            Boolean        @default(true)
+  createdBy          String?        @map("created_by")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  instances   AlertInstance[]
+  evaluations AlertEvaluation[]
+
+  @@index([projectId, enabled])
+  @@index([metric])
+  @@index([apiId])
+  @@index([environmentId])
+  @@index([monitorId])
+  @@map("alert_rules")
+}
+
+model AlertInstance {
+  id              String     @id @default(uuid())
+  alertRuleId     String     @map("alert_rule_id")
+  alertRule       AlertRule  @relation(fields: [alertRuleId], references: [id], onDelete: Cascade)
+  fingerprint     String
+  status          AlertState @default(NORMAL)
+  currentValue    Float?     @map("current_value")
+  threshold       Float
+  pendingSince    DateTime?  @map("pending_since")
+  startedAt       DateTime?  @map("started_at")
+  lastEvaluatedAt DateTime   @default(now()) @map("last_evaluated_at")
+  resolvedAt      DateTime?  @map("resolved_at")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  evaluations AlertEvaluation[]
+
+  @@index([alertRuleId, status])
+  @@index([fingerprint])
+  @@index([status])
+  @@index([startedAt])
+  @@map("alert_instances")
+}
+
+model AlertEvaluation {
+  id              String         @id @default(uuid())
+  alertRuleId     String         @map("alert_rule_id")
+  alertRule       AlertRule      @relation(fields: [alertRuleId], references: [id], onDelete: Cascade)
+  alertInstanceId String?        @map("alert_instance_id")
+  alertInstance   AlertInstance? @relation(fields: [alertInstanceId], references: [id], onDelete: Cascade)
+  value           Float?
+  threshold       Float
+  conditionMet    Boolean        @map("condition_met")
+  stateBefore     AlertState     @map("state_before")
+  stateAfter      AlertState     @map("state_after")
+  evaluatedAt     DateTime       @default(now()) @map("evaluated_at")
+
+  @@index([alertInstanceId, evaluatedAt])
+  @@index([alertRuleId, evaluatedAt])
+  @@map("alert_evaluations")
 }

@@ -8,7 +8,9 @@ import {
   type Api,
   type Environment,
   type Monitor,
+  type AlertRule,
 } from '@/lib/api';
+import { CreateAlertRuleSheet } from '@/components/alerts/CreateAlertRuleSheet';
 import { useWorkspaceState } from '@/components/dashboards/workspace/useWorkspaceState';
 import { DashboardHeader } from '@/components/dashboards/workspace/DashboardHeader';
 import { DashboardGrid } from '@/components/dashboards/DashboardGrid';
@@ -61,6 +63,10 @@ export function DashboardViewPage() {
 
   // Active draft widget for bottom query pane
   const [draftWidget, setDraftWidget] = useState<Partial<DashboardWidget> | null>(null);
+
+  // Alert Rule creation from widget
+  const [alertSheetOpen, setAlertSheetOpen] = useState<boolean>(false);
+  const [alertDraftData, setAlertDraftData] = useState<Partial<AlertRule> | null>(null);
 
   // Debounced layout save ref
   const saveLayoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -317,6 +323,18 @@ export function DashboardViewPage() {
   // All widgets render their metrics computed according to filter precedence (Widget > Global > Default)
   const displayedWidgets = widgets;
 
+  const handleCreateAlertFromWidget = (widget: DashboardWidget) => {
+    setAlertDraftData({
+      name: `${widget.title || 'API'} Alert`,
+      metric: widget.metric,
+      projectId: dashboard?.projectId,
+      apiId: widget.configuration?.apiId || selectedApiId || undefined,
+      environmentId: widget.configuration?.environmentId || selectedEnvironmentId || undefined,
+      monitorId: widget.configuration?.monitorId || undefined,
+    });
+    setAlertSheetOpen(true);
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-background text-foreground">
       {/* 1. Global Workspace Header */}
@@ -358,6 +376,7 @@ export function DashboardViewPage() {
             onAddVisualization={() => {
               openRightDrawer();
             }}
+            onCreateAlert={handleCreateAlertFromWidget}
           />
         </main>
 
@@ -397,6 +416,16 @@ export function DashboardViewPage() {
         onClose={closeBottomPane}
         onSaveWidget={handleSaveWidgetFromBottomPane}
         onChangeDraft={setDraftWidget}
+      />
+
+      {/* 5. Create Alert Rule Sheet initiated from Widget */}
+      <CreateAlertRuleSheet
+        open={alertSheetOpen}
+        onOpenChange={setAlertSheetOpen}
+        initialData={alertDraftData}
+        onSuccess={() => {
+          setAlertSheetOpen(false);
+        }}
       />
     </div>
   );

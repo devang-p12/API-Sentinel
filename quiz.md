@@ -675,3 +675,71 @@ Understand metric calculation isolation, backend data aggregation, percentile al
 13. **Contract Drift (Schema Validation)**: If an API returns HTTP 200 OK but deletes a required field (e.g. `user.id`), why does standard HTTP status monitoring miss this, and how does JSON Schema validation protect consumers?
 
 </details>
+
+---
+
+## QUIZ-011: Phase 5A — Production-Grade Alert Engine Architecture
+
+**Feature:**
+Stateful Alert Engine, Deduplication Fingerprints, Pending Grace Windows, Recovery, and Concurrency Isolation
+
+**Date:**
+2026-10-26
+
+**Status:**
+Active Verification Knowledge Base
+
+### Questions & Deep-Dive Answers:
+
+1. **What is the fundamental difference between an `AlertRule` and an `AlertInstance`?**
+   - **`AlertRule` (Policy Definition)**: An `AlertRule` defines the operational contract: which metric to watch, what resource dimensions it applies to (API, environment, monitor), what threshold operator to check (`GREATER_THAN`, `LESS_THAN`), what pending duration window (`duration`) to enforce, evaluation frequency, severity, and routing labels. It is created once by an administrator.
+   - **`AlertInstance` (Concrete State Lifecycle)**: An `AlertInstance` represents a physical, point-in-time occurrence of that rule violating its condition on specific dimensions. A single rule can produce multiple instances over time (e.g. firing today for 15 minutes, resolving, and firing next week). Conflating the rule and its instance destroys auditability and causes race conditions when multiple environments trigger the same rule.
+
+2. **Why must the Alert Engine implement a 4-state state machine (`NORMAL`, `PENDING`, `FIRING`, `RESOLVED`) instead of a simple binary (`FIRING` vs `NORMAL`)?**
+   - Binary alerting fires immediately upon a single metric spike (e.g. a 1200ms latency spike caused by a routine garbage collection pause or brief network hiccup).
+   - In a 4-state state machine:
+     - The first violation moves state from `NORMAL` to `PENDING` and records `pendingSince = now`.
+     - The alert only transitions from `PENDING` to `FIRING` if the violation persists for the full `duration` window (e.g. 2 minutes).
+     - If the condition clears before the duration elapses, the alert returns to `RESOLVED`/`NORMAL` without ever firing. This prevents noisy, false-alarm alert fatigue while ensuring real outages trigger reliably.
+
+3. **What is an Alert Fingerprint, and how does it prevent duplicate firing alerts?**
+   - An alert fingerprint is a deterministic SHA-256 hash computed from the rule and its target dimensions:
+     ```text
+     fingerprint = hash(alertRuleId + apiId + environmentId + monitorId + sortedLabels)
+     ```
+   - On every evaluation tick (e.g. every 30s), Sentinel queries for existing active instances where `fingerprint = ?` and `status IN ['PENDING', 'FIRING']`.
+   - If an active instance exists, Sentinel updates its `currentValue` and `lastEvaluatedAt` rather than inserting a new row. Without fingerprints, a 1-hour outage evaluated every 30 seconds would create 120 separate duplicate alerts.
+
+4. **What happens during Recovery (`FIRING -> RESOLVED`), and why are resolved instances preserved in PostgreSQL?**
+   - When metric evaluation returns `conditionMet = false` for an active `FIRING` instance, the state machine transitions to `RESOLVED`, sets `resolvedAt = now`, and records an `AlertEvaluation` audit log entry.
+   - Resolved instances are **never deleted**. Retaining resolved instances in PostgreSQL provides historical MTTR (Mean Time to Resolution) analytics, SLA accounting, and post-incident review records (e.g. "Payment API Latency fired at 02:13:42 and resolved at 02:21:14 with a total duration of 7m 32s").
+
+5. **If an API experiences another violation after an alert has resolved, what happens?**
+   - Because the prior instance has `status = 'RESOLVED'`, it is no longer matched by the query for active instances (`status IN ['PENDING', 'FIRING']`).
+   - The engine safely creates a brand new `AlertInstance` starting in `PENDING` with its own `pendingSince` timestamp, preserving the historical instance untouched and maintaining independent lifecycle metrics for both events.
+
+6. **Why does `AlertEvaluation` exist as a separate model from `AlertInstance`?**
+   - `AlertInstance` stores the *current status* (e.g. FIRING since 10 minutes ago).
+   - `AlertEvaluation` stores an *immutable time-series log* of every single check: timestamp, metric value observed, condition result (`true`/`false`), and state transition (`PENDING -> FIRING`, `FIRING -> FIRING`, `FIRING -> RESOLVED`).
+   - This allows engineers to inspect the exact historical timeline answering: *"Why did this alert fire, what values were recorded over time, and what caused it to recover?"*.
+
+7. **How does Sentinel guarantee concurrency safety when multiple workers evaluate alerts simultaneously?**
+   - Sentinel uses native PostgreSQL transaction-level advisory locks:
+     ```sql
+     SELECT pg_advisory_xact_lock(hashtext(fingerprint));
+     ```
+   - Before reading or writing an alert instance, the transaction acquires an advisory lock on the fingerprint hash.
+   - If Worker A and Worker B evaluate the same rule simultaneously, Worker B waits for Worker A's transaction to commit. When Worker B proceeds, it sees Worker A's committed instance and updates it rather than inserting a duplicate. The lock automatically releases on commit or rollback with zero external dependencies.
+
+8. **Why are Incidents (Phase 5B) strictly separate from Alerts (Phase 5A)?**
+   - An **Alert** answers: *"What specific metric condition is violated on what resource?"* (e.g., "Payment API p95 Latency > 1000ms").
+   - An **Incident** answers: *"What larger operational crisis is impacting users?"*
+   - During a major outage (e.g., database failover), dozens of distinct alerts fire simultaneously (Payment API slow, Auth API failing, Orders timing out). Treating every alert as an incident creates chaos and duplicate tickets. In Phase 5B, the Incident Engine will correlate and group related alert instances into a single unified incident.
+
+9. **Why are Notification Channels (Slack, Email, PagerDuty) excluded from Phase 5A?**
+   - In mature observability architectures (e.g. Grafana Alerting, Alertmanager), the **Evaluation Engine** (discovering violations and maintaining state) must be decoupled from the **Notification Routing Engine** (formatting, throttling, deduplicating, and dispatching messages).
+   - Coupling notifications into the evaluation loop causes evaluation worker timeouts if Slack or email APIs are slow or down, and floods on-call engineers with individual messages for every single evaluation tick. Notification routing belongs to Phase 6 with grouping, escalation, and contact points.
+
+10. **How does the Alert Engine avoid duplicating metric calculations?**
+    - The Alert Engine queries `MetricQueryService.query()` directly.
+    - Because `MetricQueryService` is the single source of truth for all metric math (nearest-rank percentiles, error rates, SLA availability), the Alert Engine and Dashboard Widgets always observe the exact same values without diverging formulas.

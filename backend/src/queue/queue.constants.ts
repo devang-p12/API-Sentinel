@@ -1,3 +1,5 @@
 export const MONITOR_QUEUE = 'monitor-execution-queue';
 export const REDIS_CONNECTION = 'REDIS_CONNECTION';
 export const MONITOR_BULL_QUEUE = 'MONITOR_BULL_QUEUE';
+export const ALERT_EVALUATION_QUEUE = 'alert-evaluation-queue';
+export const ALERT_BULL_QUEUE = 'ALERT_BULL_QUEUE';

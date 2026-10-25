@@ -6,7 +6,10 @@ import { HttpProbeService } from './services/http-probe.service';
 import { MonitorExecutionService } from './services/monitor-execution.service';
 import { MonitorWorker } from './workers/monitor.worker';
 
+import { AlertRulesModule } from '../alert-rules/alert-rules.module';
+
 @Module({
+  imports: [AlertRulesModule],
   controllers: [MonitorsController],
   providers: [
     MonitorsService,

@@ -12,6 +12,9 @@ export interface ExecutionQueryOptions {
   status?: ExecutionStatus;
 }
 
+import { Optional } from '@nestjs/common';
+import { AlertEvaluationService } from '../../alert-rules/services/alert-evaluation.service';
+
 @Injectable()
 export class MonitorExecutionService {
   private readonly logger = new Logger(MonitorExecutionService.name);
@@ -20,6 +23,7 @@ export class MonitorExecutionService {
     private readonly prisma: PrismaService,
     private readonly httpProbeService: HttpProbeService,
     private readonly incidentEvaluator: IncidentEvaluatorService,
+    @Optional() private readonly alertEvaluator?: AlertEvaluationService,
   ) {}
 
   /**
@@ -108,6 +112,14 @@ export class MonitorExecutionService {
       await this.incidentEvaluator.evaluateMonitor(monitor.id);
     } catch (err: any) {
       this.logger.warn(`Incident evaluation skipped: ${err.message}`);
+    }
+
+    if (this.alertEvaluator) {
+      try {
+        await this.alertEvaluator.evaluateRulesForMonitor(monitor.id);
+      } catch (err: any) {
+        this.logger.warn(`Alert rule evaluation skipped: ${err.message}`);
+      }
     }
 
     return execution;
