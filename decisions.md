@@ -630,6 +630,37 @@ Redesign the Sentinel dashboard into a **Grafana-inspired, highly interactive ob
 **Date:**
 2026-10-25
 
+---
+
+## ADR-021: Direct Drag-and-Drop Canvas Spatial Placement & Simplified Context Menus
+
+**Decision:**
+Replace manual menu-driven position shifting ("Shift Left", "Shift Right", "Row Above", "Row Below") with **direct HTML5 Drag-and-Drop spatial canvas reordering** and a clean, lightweight three-dot contextual menu:
+1. **Direct Drag-and-Drop Placement**:
+   - Each visualization panel in Edit Mode features a dedicated `[⠿ Drag]` grip handle with `cursor-grab active:cursor-grabbing` and draggable outer wrapper.
+   - Hovering over adjacent panels uses precision midpoint detection (`mouseX < rect.left + rect.width / 2`) to distinguish `before` vs `after` insertion targets.
+   - Vivid visual drop indicators: glowing blue pulse vertical insertion bars on target card edges (`-left-2 top-0 bottom-0 w-1.5 bg-primary shadow-[0_0_12px_rgba(59,130,246,0.9)]`) and active drag ghost states (`opacity-35 scale-[0.98] border-dashed ring-2 ring-primary/60`).
+   - Dedicated Canvas Bottom Drop Zone: allows dragging any panel to the bottom to instantly place it on a fresh row.
+2. **Dynamic Coordinate Recalculation (`calculateLayout`)**:
+   - Dropping a panel recomputes `x` and `y` offsets based on accumulated column widths (`curX + width > 12`) and `newRow` breaks, avoiding coordinate collisions and preserving the responsive 12-column layout.
+3. **Simplified Three-Dot Contextual Menu**:
+   - Removed cluttered position shifting buttons ("Shift Left", "Shift Right", "Row Above", "Row Below", and redundant resize buttons) from the dropdown menu.
+   - Retained only essential panel lifecycle actions: `Edit Query`, `Duplicate`, `Start on New Row (↵)`, and `Delete Panel`.
+   - Direct arrow buttons for width (`[←] 6/12 [→]`) and height (`[↑] 3 rows [↓]`) remain immediately accessible on the panel header bar for fast single-click sizing.
+
+**Reason:**
+- **Cognitive Load of Menu-Based Layout Shifting**: Navigating into a dropdown menu to click "Shift Left" or "Row Above" repeated times is tedious and unintuitive. Engineers expect to drag and drop panels directly to their desired position on an observability canvas.
+- **Immediate Spatial Feedback**: Visual insertion bars show exactly where the panel will land before releasing the mouse.
+- **Clean Information Hierarchy**: Eliminating shifting controls from the three-dot menu makes the menu clean, fast, and focused on panel query configuration and lifecycle.
+
+**Consequences:**
+- Visualizations are freely movable across rows and columns via natural drag and drop.
+- Layout coordinates automatically persist with debounced autosave.
+- Three-dot menu is decluttered and streamlined.
+
+**Date:**
+2026-10-26
+
 
 
 

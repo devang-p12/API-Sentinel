@@ -41,6 +41,8 @@ export function DashboardGrid({
 }: DashboardGridProps) {
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [draggedWidgetId, setDraggedWidgetId] = useState<string | null>(null);
+  const [dragOverTarget, setDragOverTarget] = useState<{ id: string; position: 'before' | 'after' } | null>(null);
+  const [isOverBottomDropZone, setIsOverBottomDropZone] = useState<boolean>(false);
 
   if (widgets.length === 0) {
     return (
@@ -91,6 +93,35 @@ export function DashboardGrid({
     }
   };
 
+  // Helper to recompute x and y coordinates dynamically based on widths and newRow breaks
+  const calculateLayout = (widgetList: DashboardWidget[]): DashboardWidget[] => {
+    let curX = 0;
+    let curY = 0;
+    let rowMaxHeight = 3;
+
+    return widgetList.map((w) => {
+      const width = w.width || 6;
+      const height = w.height || 3;
+      const isNewRow = Boolean(w.configuration?.newRow);
+
+      if ((isNewRow || curX + width > 12) && curX > 0) {
+        curX = 0;
+        curY += rowMaxHeight;
+        rowMaxHeight = height;
+      } else {
+        rowMaxHeight = Math.max(rowMaxHeight, height);
+      }
+
+      const positioned = {
+        ...w,
+        x: curX,
+        y: curY,
+      };
+      curX += width;
+      return positioned;
+    });
+  };
+
   // Drag & drop handlers
   const handleDragStart = (e: DragEvent, id: string) => {
     if (!isEditMode) return;
@@ -99,34 +130,128 @@ export function DashboardGrid({
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const handleDragOver = (e: DragEvent) => {
+  const handleDragEnd = () => {
+    setDraggedWidgetId(null);
+    setDragOverTarget(null);
+    setIsOverBottomDropZone(false);
+  };
+
+  const handleDragOverCard = (e: DragEvent, targetWidget: DashboardWidget) => {
     if (!isEditMode) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+
+    const sourceId = draggedWidgetId || e.dataTransfer.getData('text/plain');
+    if (!sourceId || sourceId === targetWidget.id) {
+      if (dragOverTarget) setDragOverTarget(null);
+      return;
+    }
+
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const mouseX = e.clientX;
+    const isBefore = mouseX < rect.left + rect.width / 2;
+    const position: 'before' | 'after' = isBefore ? 'before' : 'after';
+
+    if (!dragOverTarget || dragOverTarget.id !== targetWidget.id || dragOverTarget.position !== position) {
+      setDragOverTarget({ id: targetWidget.id, position });
+    }
   };
 
-  const handleDrop = (e: DragEvent, targetId: string) => {
+  const handleDragLeaveCard = (e: DragEvent) => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    if (
+      e.clientX < rect.left ||
+      e.clientX >= rect.right ||
+      e.clientY < rect.top ||
+      e.clientY >= rect.bottom
+    ) {
+      setDragOverTarget(null);
+    }
+  };
+
+  const handleDropOnCard = (e: DragEvent, targetWidget: DashboardWidget) => {
     if (!isEditMode) return;
     e.preventDefault();
     const sourceId = draggedWidgetId || e.dataTransfer.getData('text/plain');
-    if (!sourceId || sourceId === targetId) return;
+    if (!sourceId || sourceId === targetWidget.id) {
+      handleDragEnd();
+      return;
+    }
 
     const sourceIndex = widgets.findIndex((w) => w.id === sourceId);
-    const targetIndex = widgets.findIndex((w) => w.id === targetId);
-    if (sourceIndex === -1 || targetIndex === -1) return;
+    if (sourceIndex === -1) {
+      handleDragEnd();
+      return;
+    }
 
     const reordered = [...widgets];
     const [moved] = reordered.splice(sourceIndex, 1);
-    reordered.splice(targetIndex, 0, moved);
 
-    const updated = reordered.map((w, idx) => ({
-      ...w,
-      x: (idx * 6) % 12,
-      y: Math.floor((idx * 6) / 12) * 3,
-    }));
+    let targetIndex = reordered.findIndex((w) => w.id === targetWidget.id);
+    if (targetIndex === -1) {
+      reordered.push(moved);
+    } else {
+      const position = dragOverTarget?.position || 'after';
+      if (position === 'after') {
+        targetIndex += 1;
+      }
+      
+      const movedItem = {
+        ...moved,
+        configuration: {
+          ...moved.configuration,
+          newRow: position === 'before' ? Boolean(targetWidget.configuration?.newRow) : false,
+        },
+      };
 
+      if (position === 'before' && targetWidget.configuration?.newRow) {
+        const targetInArray = reordered.find((w) => w.id === targetWidget.id);
+        if (targetInArray) {
+          targetInArray.configuration = {
+            ...targetInArray.configuration,
+            newRow: false,
+          };
+        }
+      }
+
+      reordered.splice(targetIndex, 0, movedItem);
+    }
+
+    const updated = calculateLayout(reordered);
     onUpdateLayout(updated);
-    setDraggedWidgetId(null);
+    handleDragEnd();
+  };
+
+  const handleDropOnBottomZone = (e: DragEvent) => {
+    if (!isEditMode) return;
+    e.preventDefault();
+    const sourceId = draggedWidgetId || e.dataTransfer.getData('text/plain');
+    if (!sourceId) {
+      handleDragEnd();
+      return;
+    }
+
+    const sourceIndex = widgets.findIndex((w) => w.id === sourceId);
+    if (sourceIndex === -1) {
+      handleDragEnd();
+      return;
+    }
+
+    const reordered = [...widgets];
+    const [moved] = reordered.splice(sourceIndex, 1);
+
+    const movedToNewRow = {
+      ...moved,
+      configuration: {
+        ...moved.configuration,
+        newRow: true,
+      },
+    };
+    reordered.push(movedToNewRow);
+
+    const updated = calculateLayout(reordered);
+    onUpdateLayout(updated);
+    handleDragEnd();
   };
 
   // Direct Arrow Adjust Width [3..12]
@@ -135,7 +260,7 @@ export function DashboardGrid({
     const newWidth = Math.min(12, Math.max(3, currentW + delta));
     if (newWidth === currentW) return;
     const updated = widgets.map((w) => (w.id === widget.id ? { ...w, width: newWidth } : w));
-    onUpdateLayout(updated);
+    onUpdateLayout(calculateLayout(updated));
   };
 
   // Direct Arrow Adjust Height (Row Span) [2..8]
@@ -144,7 +269,7 @@ export function DashboardGrid({
     const newHeight = Math.min(8, Math.max(2, currentH + delta));
     if (newHeight === currentH) return;
     const updated = widgets.map((w) => (w.id === widget.id ? { ...w, height: newHeight } : w));
-    onUpdateLayout(updated);
+    onUpdateLayout(calculateLayout(updated));
   };
 
   // Helper to group widgets into rows based on column width and row breaks
@@ -199,15 +324,8 @@ export function DashboardGrid({
     }
 
     const cleanRows = rows.filter((r) => r.length > 0);
-    const reordered = cleanRows.flatMap((r, rIdx) =>
-      r.map((w, cIdx) => ({
-        ...w,
-        x: (cIdx * (w.width || 6)) % 12,
-        y: rIdx * 3,
-      }))
-    );
-
-    onUpdateLayout(reordered);
+    const reordered = cleanRows.flatMap((r) => r);
+    onUpdateLayout(calculateLayout(reordered));
   };
 
   // Toggle whether widget breaks onto its own fresh row
@@ -224,31 +342,10 @@ export function DashboardGrid({
           }
         : w
     );
-    onUpdateLayout(updated);
-  };
-
-  // Shift position left / right within current ordering
-  const handleShiftPosition = (widget: DashboardWidget, direction: 'left' | 'right') => {
-    const idx = widgets.findIndex((w) => w.id === widget.id);
-    if (idx === -1) return;
-    const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
-    if (targetIdx < 0 || targetIdx >= widgets.length) return;
-
-    const reordered = [...widgets];
-    const temp = reordered[idx];
-    reordered[idx] = reordered[targetIdx];
-    reordered[targetIdx] = temp;
-
-    const updated = reordered.map((w, i) => ({
-      ...w,
-      x: (i * 6) % 12,
-      y: Math.floor((i * 6) / 12) * 3,
-    }));
-    onUpdateLayout(updated);
+    onUpdateLayout(calculateLayout(updated));
   };
 
   const currentRows = computeRows(widgets);
-  const totalRows = currentRows.length;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pb-12">
@@ -257,14 +354,19 @@ export function DashboardGrid({
         const isMenuOpen = activeMenuId === widget.id;
         const currentRowIndex = currentRows.findIndex((r) => r.some((w) => w.id === widget.id));
         const isNewRow = Boolean(widget.configuration?.newRow);
+        const isBeingDragged = draggedWidgetId === widget.id;
+        const isDropTargetBefore = dragOverTarget?.id === widget.id && dragOverTarget.position === 'before';
+        const isDropTargetAfter = dragOverTarget?.id === widget.id && dragOverTarget.position === 'after';
 
         return (
           <div
             key={widget.id}
             draggable={isEditMode}
             onDragStart={(e) => handleDragStart(e, widget.id)}
-            onDragOver={handleDragOver}
-            onDrop={(e) => handleDrop(e, widget.id)}
+            onDragEnd={handleDragEnd}
+            onDragOver={(e) => handleDragOverCard(e, widget)}
+            onDragLeave={handleDragLeaveCard}
+            onDrop={(e) => handleDropOnCard(e, widget)}
             onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
               if (!isEditMode) return;
               if (e.shiftKey && e.key === 'ArrowUp') {
@@ -289,26 +391,47 @@ export function DashboardGrid({
             }}
             tabIndex={isEditMode ? 0 : undefined}
             className={`col-span-12 ${colSpan} ${isNewRow ? 'md:col-start-1' : ''} transition-all duration-200 relative group flex flex-col ${
-              isEditMode
-                ? 'cursor-grab active:cursor-grabbing hover:ring-1 hover:ring-primary/60 focus:ring-1 focus:ring-primary focus:outline-none'
+              isBeingDragged
+                ? 'opacity-35 scale-[0.98] ring-2 ring-primary/60 border-dashed cursor-grabbing z-30'
+                : isEditMode
+                ? 'cursor-grab active:cursor-grabbing hover:ring-1 hover:ring-primary/40 focus:ring-1 focus:ring-primary focus:outline-none'
                 : ''
             }`}
           >
+            {/* Visual drop insertion line indicators */}
+            {isEditMode && isDropTargetBefore && (
+              <div className="absolute -left-2 top-0 bottom-0 w-1.5 bg-primary rounded-full shadow-[0_0_12px_rgba(59,130,246,0.9)] z-50 animate-pulse pointer-events-none" />
+            )}
+            {isEditMode && isDropTargetAfter && (
+              <div className="absolute -right-2 top-0 bottom-0 w-1.5 bg-primary rounded-full shadow-[0_0_12px_rgba(59,130,246,0.9)] z-50 animate-pulse pointer-events-none" />
+            )}
+
             <Card
-              className={`rounded-none border-border bg-card shadow-none h-full flex flex-col overflow-hidden relative ${
-                isEditMode ? 'border-dashed border-primary/50 bg-card/90 shadow-sm' : ''
+              className={`rounded-none border-border bg-card shadow-none h-full flex flex-col overflow-hidden relative transition-all duration-150 ${
+                isDropTargetBefore || isDropTargetAfter
+                  ? 'border-primary ring-2 ring-primary/40 shadow-md'
+                  : isEditMode
+                  ? 'border-dashed border-primary/50 bg-card/90 shadow-sm'
+                  : ''
               }`}
               style={{ minHeight: `${(widget.height || 3) * 75 + 60}px` }}
             >
               <CardHeader className="py-2.5 px-3 border-b border-border/40 bg-muted/20 flex flex-row items-center justify-between space-y-0 shrink-0">
                 <div className="flex items-center gap-2 min-w-0">
                   {isEditMode && (
-                    <span
-                      title="Drag to reposition panel"
-                      className="text-muted-foreground hover:text-foreground cursor-grab active:cursor-grabbing"
+                    <div
+                      draggable
+                      onDragStart={(e) => {
+                        e.stopPropagation();
+                        handleDragStart(e, widget.id);
+                      }}
+                      onDragEnd={handleDragEnd}
+                      title="Drag and drop to place panel anywhere on the canvas"
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted/60 hover:bg-primary/20 text-muted-foreground hover:text-primary cursor-grab active:cursor-grabbing transition-colors border border-border/50 select-none shrink-0"
                     >
-                      <HugeiconsIcon icon={DragDropIcon} className="size-3.5" />
-                    </span>
+                      <HugeiconsIcon icon={DragDropIcon} className="size-3.5 text-primary" />
+                      <span className="text-[10px] font-mono font-medium hidden sm:inline">Drag</span>
+                    </div>
                   )}
                   <CardTitle className="text-xs font-semibold truncate text-foreground">
                     {widget.title}
@@ -319,38 +442,12 @@ export function DashboardGrid({
                   {/* DIRECT ROW & COLUMN CONTROLS (Edit Mode) */}
                   {isEditMode && (
                     <div className="flex items-center gap-1">
-                      {/* Row Movement: [ ▲ ] Row 1 [ ▼ ] */}
+                      {/* Row indicator badge */}
                       <div
-                        className="flex items-center border border-border bg-card text-[10px] font-mono shadow-xs"
-                        title="Move panel to row above / below (or Shift+Up/Down)"
+                        className="px-1.5 py-0.5 border border-border bg-card text-[9px] font-mono font-semibold text-muted-foreground select-none shadow-xs"
+                        title="Current layout row"
                       >
-                        <button
-                          type="button"
-                          title="Move to row above (▲)"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleMoveRow(widget, 'up');
-                          }}
-                          disabled={currentRowIndex <= 0}
-                          className="size-5 flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors"
-                        >
-                          <HugeiconsIcon icon={ArrowUp01Icon} className="size-3" />
-                        </button>
-                        <span className="px-1 text-[9px] font-semibold text-foreground select-none">
-                          Row {currentRowIndex + 1}
-                        </span>
-                        <button
-                          type="button"
-                          title="Move to row below (▼)"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleMoveRow(widget, 'down');
-                          }}
-                          disabled={currentRowIndex >= totalRows - 1 && (currentRows[currentRowIndex]?.length || 0) <= 1}
-                          className="size-5 flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors"
-                        >
-                          <HugeiconsIcon icon={ArrowDown01Icon} className="size-3" />
-                        </button>
+                        Row {currentRowIndex + 1}
                       </div>
 
                       {/* Width Column Control: [ ← ] 6/12 [ → ] */}
@@ -427,7 +524,7 @@ export function DashboardGrid({
                     {widget.visualizationType}
                   </Badge>
 
-                  {/* Contextual Toolbar Menu */}
+                  {/* Clean Contextual Toolbar Menu */}
                   <div className="relative">
                     <Button
                       variant="ghost"
@@ -441,7 +538,7 @@ export function DashboardGrid({
 
                     {isMenuOpen && (
                       <div
-                        className="absolute right-0 top-7 z-50 w-52 bg-card border border-border shadow-xl p-1 text-xs font-mono space-y-0.5"
+                        className="absolute right-0 top-7 z-50 w-44 bg-card border border-border shadow-xl p-1 text-xs font-mono space-y-0.5"
                         onMouseLeave={() => setActiveMenuId(null)}
                       >
                         <button
@@ -471,124 +568,20 @@ export function DashboardGrid({
                         {isEditMode && (
                           <>
                             <div className="border-t border-border/50 my-1" />
-
-                            <div className="px-2 py-0.5 text-[9px] text-muted-foreground uppercase font-semibold">
-                              Change Row (Move Row)
-                            </div>
-                            <div className="grid grid-cols-2 gap-1 px-1">
-                              <button
-                                type="button"
-                                onClick={() => handleMoveRow(widget, 'up')}
-                                className="px-1.5 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1 text-foreground disabled:opacity-30"
-                                disabled={currentRowIndex <= 0}
-                              >
-                                <HugeiconsIcon icon={ArrowUp01Icon} className="size-3" />
-                                <span>Row Above</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleMoveRow(widget, 'down')}
-                                className="px-1.5 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1 text-foreground disabled:opacity-30"
-                                disabled={currentRowIndex >= totalRows - 1 && (currentRows[currentRowIndex]?.length || 0) <= 1}
-                              >
-                                <span>Row Below</span>
-                                <HugeiconsIcon icon={ArrowDown01Icon} className="size-3" />
-                              </button>
-                            </div>
-
-                            <div className="px-1 pt-1">
-                              <button
-                                type="button"
-                                onClick={() => handleToggleNewRow(widget)}
-                                className={`w-full py-1 text-[10px] border flex items-center justify-center gap-1.5 ${
-                                  isNewRow
-                                    ? 'bg-primary/10 border-primary text-primary font-semibold'
-                                    : 'bg-muted/40 hover:bg-muted border-border text-foreground'
-                                }`}
-                              >
-                                <span>{isNewRow ? '✓ Starts on New Row' : 'Start on New Row (↵)'}</span>
-                              </button>
-                            </div>
-
-                            <div className="border-t border-border/50 my-1" />
-
-                            <div className="px-2 py-0.5 text-[9px] text-muted-foreground uppercase font-semibold">
-                              Resize Width (Columns)
-                            </div>
-                            <div className="flex items-center gap-1 px-1">
-                              <button
-                                type="button"
-                                onClick={() => handleAdjustWidth(widget, -1)}
-                                className="flex-1 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1 text-foreground disabled:opacity-30"
-                                disabled={(widget.width || 6) <= 3}
-                              >
-                                <HugeiconsIcon icon={ArrowLeft01Icon} className="size-3" />
-                                <span>Shrink</span>
-                              </button>
-                              <span className="text-[10px] font-mono px-1 font-semibold text-foreground">
-                                {widget.width || 6}/12
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => handleAdjustWidth(widget, 1)}
-                                className="flex-1 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1 text-foreground disabled:opacity-30"
-                                disabled={(widget.width || 6) >= 12}
-                              >
-                                <span>Expand</span>
-                                <HugeiconsIcon icon={ArrowRight01Icon} className="size-3" />
-                              </button>
-                            </div>
-
-                            <div className="px-2 py-0.5 text-[9px] text-muted-foreground uppercase font-semibold mt-1">
-                              Resize Height (Row Span)
-                            </div>
-                            <div className="flex items-center gap-1 px-1">
-                              <button
-                                type="button"
-                                onClick={() => handleAdjustHeight(widget, -1)}
-                                className="flex-1 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1 text-foreground disabled:opacity-30"
-                                disabled={(widget.height || 3) <= 2}
-                              >
-                                <HugeiconsIcon icon={ArrowUp01Icon} className="size-3" />
-                                <span>Shorter</span>
-                              </button>
-                              <span className="text-[10px] font-mono px-1 font-semibold text-foreground">
-                                {widget.height || 3} rows
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => handleAdjustHeight(widget, 1)}
-                                className="flex-1 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1 text-foreground disabled:opacity-30"
-                                disabled={(widget.height || 3) >= 8}
-                              >
-                                <span>Taller</span>
-                                <HugeiconsIcon icon={ArrowDown01Icon} className="size-3" />
-                              </button>
-                            </div>
-
-                            <div className="border-t border-border/50 my-1" />
-
-                            <div className="px-2 py-0.5 text-[9px] text-muted-foreground uppercase font-semibold">
-                              Shift Column Position
-                            </div>
-                            <div className="grid grid-cols-2 gap-1 px-1">
-                              <button
-                                type="button"
-                                onClick={() => handleShiftPosition(widget, 'left')}
-                                className="px-1.5 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1 text-foreground"
-                              >
-                                <HugeiconsIcon icon={ArrowLeft01Icon} className="size-3" />
-                                <span>Shift Left</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleShiftPosition(widget, 'right')}
-                                className="px-1.5 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1 text-foreground"
-                              >
-                                <span>Shift Right</span>
-                                <HugeiconsIcon icon={ArrowRight01Icon} className="size-3" />
-                              </button>
-                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuId(null);
+                                handleToggleNewRow(widget);
+                              }}
+                              className={`w-full px-2 py-1.5 text-[11px] border flex items-center gap-2 ${
+                                isNewRow
+                                  ? 'bg-primary/10 border-primary text-primary font-semibold'
+                                  : 'bg-muted/40 hover:bg-muted border-border text-foreground'
+                              }`}
+                            >
+                              <span>{isNewRow ? '✓ Starts on New Row' : 'Start on New Row (↵)'}</span>
+                            </button>
                           </>
                         )}
 
@@ -747,6 +740,32 @@ export function DashboardGrid({
           </div>
         );
       })}
+
+      {/* Canvas Bottom Drop Zone for New Row Placement */}
+      {isEditMode && (
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (!isOverBottomDropZone) setIsOverBottomDropZone(true);
+          }}
+          onDragLeave={() => setIsOverBottomDropZone(false)}
+          onDrop={handleDropOnBottomZone}
+          className={`col-span-12 border-2 border-dashed transition-all duration-200 py-6 px-4 flex flex-col items-center justify-center text-center gap-1.5 select-none ${
+            isOverBottomDropZone
+              ? 'border-primary bg-primary/10 text-primary scale-[1.01] shadow-lg ring-2 ring-primary/40'
+              : 'border-border/60 hover:border-primary/40 bg-card/20 text-muted-foreground'
+          }`}
+        >
+          <div className="flex items-center gap-2 text-xs font-mono font-medium">
+            <HugeiconsIcon icon={DragDropIcon} className="size-4 text-primary" />
+            <span>Drop visualization here to place at the bottom on a new row</span>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Drag any panel by its header or grip handle to freely move it before/after other panels or into a new row
+          </p>
+        </div>
+      )}
     </div>
   );
 }

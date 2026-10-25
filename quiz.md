@@ -500,6 +500,39 @@ Understand multi-region adjustable workspace architecture, pointer capture resiz
 
 ---
 
+## QUIZ-008 — Dashboard Drag-and-Drop Panel Placement & Canvas Spatial Flow
+
+**Feature:**
+Grafana-Style Intuitive Drag-and-Drop Panel Placement
+
+**Date:**
+2026-10-26
+
+**Status:**
+Stored for Learning & Review
+
+**Purpose:**
+Understand intuitive spatial manipulation on a 12-column responsive grid, visual insertion indicators, drag lifecycle states, dynamic layout coordinate recalculation, and eliminating modal/menu friction in observability workspaces.
+
+### Questions:
+
+1. **Direct Manipulation vs. Menu-Based Shifting**:
+   Why is direct canvas drag-and-drop vastly superior to hiding spatial shifting controls ("Shift Left", "Shift Right", "Row Above", "Row Below") inside a three-dot dropdown menu? What cognitive load does menu-based layout shifting impose on an engineer?
+
+2. **Precision Drop Detection (`before` vs `after`)**:
+   In `handleDragOverCard`, how does measuring the cursor's client X position relative to the target element's bounding rect midpoint (`mouseX < rect.left + rect.width / 2`) determine whether the dragged widget should be inserted before or after the hovered card?
+
+3. **Visual Affordances & Drop Indicators**:
+   Why are glowing insertion lines (e.g. blue pulse bar on the target's left/right border) and active drag ghost states (`opacity-35 scale-[0.98] border-dashed ring-2 ring-primary`) critical during spatial rearrangement? What happens to the user experience if visual feedback is missing?
+
+4. **Dynamic Coordinate Calculation (`calculateLayout`)**:
+   Why is recomputing `x` and `y` dynamically based on cumulative column widths (`curX + width > 12`) and `newRow` breaks superior to hardcoding coordinates with fixed card step increments (e.g. `(idx * 6) % 12`)?
+
+5. **Dedicated Canvas Drop Zones**:
+   How does providing a dedicated bottom drop zone ("Drop visualization here to place at the bottom on a new row") allow users to break cards into new rows without manually opening configuration panes or fiddling with row settings?
+
+---
+
 ## Historical Architecture Quizzes Archive
 
 ### Phase 1 & 2: Backend Architecture & Reliability Intelligence Archive
