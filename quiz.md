@@ -452,6 +452,54 @@ Understand configuration-driven dashboard architectures, metric registry design,
 
 ---
 
+## QUIZ-007 — Grafana-Style Interactive Workspace UX & Multi-Pane Layout
+
+**Feature:**
+Grafana-Inspired Interactive Observability Workspace
+
+**Date:**
+2026-10-25
+
+**Status:**
+Stored for Learning & Review
+
+**Purpose:**
+Understand multi-region adjustable workspace architecture, pointer capture resizing, workspace state vs telemetry state separation, debounced autosave mechanics, pane exclusivity coordination, and resilient widget boundaries.
+
+### Questions:
+
+1. **Workspace vs. Static Dashboard**:
+   Why is an adjustable multi-pane workspace (with sliding drawers, resizable panes, and view/edit modes) fundamentally superior to a static collection of dashboard cards for API observability?
+
+2. **Pointer Capture Resizing**:
+   How does the `ResizeHandle` use native `setPointerCapture` and `releasePointerCapture` to maintain smooth dragging even when the cursor moves outside the handle or browser window? Why is this superior to listening only to `mousemove` on the handle element?
+
+3. **Separation of Workspace State from Telemetry**:
+   Why is workspace UI state (`sidebarWidth`, `rightDrawerOpen`, `bottomPaneHeight`, `editMode`) maintained separately in `useWorkspaceState` rather than stored in the database or combined with `DashboardDataResponse`?
+
+4. **In-Context Drawer & Live Preview**:
+   When a user clicks "+ Add visualization", why is it critical that the right-side drawer slides in over the existing canvas rather than navigating to a dedicated `/dashboards/widgets/new` page? How does the live telemetry preview work before saving?
+
+5. **Pane Exclusivity Principle**:
+   Why does the Sentinel workspace strictly enforce a maximum of ONE active right drawer and ONE active bottom configuration pane at any time? What UX failure does this prevent?
+
+6. **Debounced Autosave (600ms)**:
+   When dragging or resizing widgets in Edit Mode, why is saving debounced by 600ms instead of persisting on every pointer move event or requiring a modal confirmation dialog?
+
+7. **Independent Widget Loading & Error Boundaries**:
+   If one widget's metric query fails (e.g. database timeout on P99 latency calculation), why must it fail in isolation with its own error badge while adjacent widgets (Availability, Error Rate) render normally?
+
+8. **View Mode vs. Edit Mode**:
+   Why should normal dashboard consumption occur in "View Mode" where dragging and resizing are disabled? What problem occurs if chart inspection interactions conflict with layout drag handles?
+
+9. **Sidebar Collapsed & Resizable Dynamics**:
+   How does the Sentinel sidebar maintain navigation usability when collapsed to 64px width? Why are tooltips required in collapsed mode, and why must navigation not be dependent solely on hover?
+
+10. **Responsive Behavior**:
+    How does the 12-column grid adapt when viewed on smaller tablet or laptop screens, and how do the right drawer and bottom pane adjust to prevent horizontal page overflow?
+
+---
+
 ## Historical Architecture Quizzes Archive
 
 ### Phase 1 & 2: Backend Architecture & Reliability Intelligence Archive

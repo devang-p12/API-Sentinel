@@ -1,95 +1,252 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { api, type DashboardDataResponse, type DashboardWidget } from '@/lib/api';
-import { PageContainer } from '@/components/layout/PageContainer';
-import { Button } from '@/components/ui/button';
-import { DashboardGrid } from '@/components/dashboards/DashboardGrid';
-import { VisualizationBuilderDialog } from '@/components/dashboards/VisualizationBuilderDialog';
-import { HugeiconsIcon } from '@hugeicons/react';
 import {
-  Add01Icon,
-  Edit02Icon,
-  Tick02Icon,
-  RefreshIcon,
-  FloppyDiskIcon,
-} from '@hugeicons/core-free-icons';
+  api,
+  type DashboardDataResponse,
+  type DashboardWidget,
+  type MetricDefinition,
+  type Api,
+  type Environment,
+  type Monitor,
+} from '@/lib/api';
+import { useWorkspaceState } from '@/components/dashboards/workspace/useWorkspaceState';
+import { DashboardHeader } from '@/components/dashboards/workspace/DashboardHeader';
+import { DashboardGrid } from '@/components/dashboards/DashboardGrid';
+import { VisualizationDrawer } from '@/components/dashboards/workspace/VisualizationDrawer';
+import { QueryPane } from '@/components/dashboards/workspace/QueryPane';
 
 export function DashboardViewPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
+  // Workspace layout & drawer states
+  const {
+    editMode,
+    setEditMode,
+    saveStatus,
+    setSaveStatus,
+    rightDrawerOpen,
+    rightDrawerWidth,
+    openRightDrawer,
+    closeRightDrawer,
+    setRightDrawerWidth,
+    bottomPaneOpen,
+    bottomPaneHeight,
+    bottomPaneCollapsed,
+    openBottomPane,
+    closeBottomPane,
+    toggleBottomPaneCollapse,
+    setBottomPaneHeight,
+    selectedWidgetId,
+    setSelectedWidgetId,
+  } = useWorkspaceState();
+
+  // Data states
   const [dashboardData, setDashboardData] = useState<DashboardDataResponse | null>(null);
   const [widgets, setWidgets] = useState<DashboardWidget[]>([]);
-  const [timeRange, setTimeRange] = useState('24h');
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isSavingLayout, setIsSavingLayout] = useState(false);
-  const [hasUnsavedLayout, setHasUnsavedLayout] = useState(false);
+  const [catalog, setCatalog] = useState<MetricDefinition[]>([]);
+  const [apis, setApis] = useState<Api[]>([]);
+  const [environments, setEnvironments] = useState<Environment[]>([]);
+  const [monitors, setMonitors] = useState<Monitor[]>([]);
 
-  // Modal states
-  const [isBuilderOpen, setIsBuilderOpen] = useState(false);
-  const [editingWidget, setEditingWidget] = useState<DashboardWidget | null>(null);
+  // Global filters
+  const [selectedApiId, setSelectedApiId] = useState<string>('');
+  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<string>('');
+  const [timeRange, setTimeRange] = useState<string>('24h');
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(0);
 
+  // Loading & refresh states
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  // Active draft widget for bottom query pane
+  const [draftWidget, setDraftWidget] = useState<Partial<DashboardWidget> | null>(null);
+
+  // Debounced layout save ref
+  const saveLayoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 1. Initial Load of Dashboard & System Resources
   useEffect(() => {
     if (id) {
-      loadData(id, timeRange);
+      loadInitialData(id);
     }
-  }, [id, timeRange]);
+  }, [id]);
 
-  const loadData = async (dashboardId: string, range: string) => {
-    setIsRefreshing(true);
+  const loadInitialData = async (dashboardId: string) => {
+    setIsLoading(true);
     try {
-      const data = await api.getDashboardData(dashboardId, range);
+      const [data, cat, apisList, envsList, monsList] = await Promise.all([
+        api.getDashboardData(dashboardId, timeRange),
+        api.getMetricCatalog().catch(() => []),
+        api.getApis().catch(() => []),
+        api.getEnvironments().catch(() => []),
+        api.getMonitors().catch(() => []),
+      ]);
       setDashboardData(data);
       setWidgets(data.widgets || []);
-      setHasUnsavedLayout(false);
+      setCatalog(cat);
+      setApis(apisList);
+      setEnvironments(envsList);
+      setMonitors(monsList);
+      setSaveStatus('saved');
     } catch (err) {
-      console.error('Failed to load dashboard data:', err);
+      console.error('Failed to load dashboard:', err);
     } finally {
       setIsLoading(false);
-      setIsRefreshing(false);
     }
   };
 
-  const handleSaveWidget = async (widgetData: {
+  // 2. Fetch/Refresh Telemetry Data
+  const refreshTelemetry = useCallback(
+    async (showLoadingSpinner = true) => {
+      if (!id) return;
+      if (showLoadingSpinner) setIsRefreshing(true);
+      try {
+        const data = await api.getDashboardData(id, timeRange);
+        setDashboardData(data);
+        setWidgets(data.widgets || []);
+      } catch (err) {
+        console.error('Failed to refresh dashboard data:', err);
+      } finally {
+        if (showLoadingSpinner) setIsRefreshing(false);
+      }
+    },
+    [id, timeRange],
+  );
+
+  // Trigger refresh when global time range changes
+  useEffect(() => {
+    if (id && !isLoading) {
+      refreshTelemetry();
+    }
+  }, [id, timeRange, refreshTelemetry]);
+
+  // 3. Auto Refresh Interval Handling
+  useEffect(() => {
+    if (autoRefreshInterval <= 0 || !id) return;
+    const intervalTimer = setInterval(() => {
+      refreshTelemetry(false);
+    }, autoRefreshInterval * 1000);
+    return () => clearInterval(intervalTimer);
+  }, [autoRefreshInterval, id, refreshTelemetry]);
+
+  // 4. Debounced Layout Autosave (Section 16 & 17)
+  const handleUpdateLayout = (updatedWidgets: DashboardWidget[]) => {
+    setWidgets(updatedWidgets);
+    setSaveStatus('saving');
+
+    if (saveLayoutTimerRef.current) {
+      clearTimeout(saveLayoutTimerRef.current);
+    }
+
+    saveLayoutTimerRef.current = setTimeout(async () => {
+      if (!id) return;
+      try {
+        const layoutPayload = updatedWidgets.map((w) => ({
+          id: w.id,
+          x: w.x,
+          y: w.y,
+          width: w.width,
+          height: w.height,
+        }));
+        await api.updateDashboardLayout(id, layoutPayload);
+        setSaveStatus('saved');
+      } catch (err) {
+        console.error('Failed to autosave layout:', err);
+        setSaveStatus('error');
+      }
+    }, 600);
+  };
+
+  // 5. Widget Actions: Add, Edit, Duplicate, Delete
+  const handleAddWidget = async (data: {
     title: string;
     metric: string;
-    visualizationType: string;
+    visualizationType: 'stat' | 'time_series' | 'bar' | 'table' | 'gauge';
     configuration: Record<string, any>;
     width: number;
     height: number;
   }) => {
     if (!id) return;
-    if (editingWidget) {
-      // Update existing widget
-      await api.updateWidget(id, editingWidget.id, widgetData);
-    } else {
-      // Add new widget (place after existing widgets)
+    setSaveStatus('saving');
+    try {
       const nextY = widgets.reduce((maxY, w) => Math.max(maxY, w.y + (w.height || 3)), 0);
       await api.addWidget(id, {
-        ...widgetData,
+        ...data,
         x: 0,
         y: nextY,
       });
+      await refreshTelemetry(true);
+      setSaveStatus('saved');
+    } catch (err) {
+      console.error('Failed to add widget:', err);
+      setSaveStatus('error');
     }
-    setEditingWidget(null);
-    await loadData(id, timeRange);
+  };
+
+  const handleEditWidget = (widget: DashboardWidget) => {
+    setSelectedWidgetId(widget.id);
+    setDraftWidget({
+      ...widget,
+    });
+    // Open bottom query pane for deep query editing
+    openBottomPane(widget.id);
+  };
+
+  const handleSaveWidgetFromBottomPane = async (data: {
+    title: string;
+    metric: string;
+    visualizationType: 'stat' | 'time_series' | 'bar' | 'table' | 'gauge';
+    configuration: Record<string, any>;
+    width: number;
+    height: number;
+  }) => {
+    if (!id) return;
+    setSaveStatus('saving');
+    try {
+      if (selectedWidgetId) {
+        // Update existing widget
+        await api.updateWidget(id, selectedWidgetId, data);
+      } else {
+        // Create new widget
+        const nextY = widgets.reduce((maxY, w) => Math.max(maxY, w.y + (w.height || 3)), 0);
+        await api.addWidget(id, {
+          ...data,
+          x: 0,
+          y: nextY,
+        });
+      }
+      closeBottomPane();
+      closeRightDrawer();
+      setDraftWidget(null);
+      await refreshTelemetry(true);
+      setSaveStatus('saved');
+    } catch (err) {
+      console.error('Failed to save widget configuration:', err);
+      setSaveStatus('error');
+    }
   };
 
   const handleDeleteWidget = async (widgetId: string) => {
     if (!id) return;
-    if (!window.confirm('Remove this visualization from the dashboard?')) return;
+    if (!window.confirm('Delete this visualization panel?')) return;
+    setSaveStatus('saving');
     try {
       await api.deleteWidget(id, widgetId);
-      await loadData(id, timeRange);
+      if (selectedWidgetId === widgetId) {
+        closeBottomPane();
+      }
+      await refreshTelemetry(true);
+      setSaveStatus('saved');
     } catch (err) {
       console.error('Failed to delete widget:', err);
+      setSaveStatus('error');
     }
   };
 
   const handleDuplicateWidget = async (widget: DashboardWidget) => {
     if (!id) return;
+    setSaveStatus('saving');
     try {
       const nextY = widgets.reduce((maxY, w) => Math.max(maxY, w.y + (w.height || 3)), 0);
       await api.addWidget(id, {
@@ -102,201 +259,136 @@ export function DashboardViewPage() {
         x: 0,
         y: nextY,
       });
-      await loadData(id, timeRange);
+      await refreshTelemetry(true);
+      setSaveStatus('saved');
     } catch (err) {
       console.error('Failed to duplicate widget:', err);
+      setSaveStatus('error');
     }
   };
 
-  const handleLayoutChange = (updatedWidgets: DashboardWidget[]) => {
-    setWidgets(updatedWidgets);
-    setHasUnsavedLayout(true);
-  };
-
-  const handleSaveLayout = async () => {
-    if (!id) return;
-    setIsSavingLayout(true);
-    try {
-      const layoutPayload = widgets.map((w) => ({
-        id: w.id,
-        x: w.x,
-        y: w.y,
-        width: w.width,
-        height: w.height,
-      }));
-      await api.updateDashboardLayout(id, layoutPayload);
-      setHasUnsavedLayout(false);
-    } catch (err) {
-      console.error('Failed to save layout:', err);
-    } finally {
-      setIsSavingLayout(false);
-    }
-  };
+  // Active widget being edited in bottom pane
+  const activeEditingWidget = widgets.find((w) => w.id === selectedWidgetId) || null;
 
   if (isLoading && !dashboardData) {
     return (
-      <PageContainer
-        title="Loading Dashboard..."
-        description="Fetching custom telemetry..."
-        breadcrumbs={[{ label: 'Sentinel', href: '/dashboard' }, { label: 'Dashboards', href: '/dashboards' }, { label: 'Loading' }]}
-      >
-        <div className="py-24 flex flex-col items-center justify-center space-y-3 text-muted-foreground text-xs animate-pulse">
-          <div className="size-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-          <span className="font-mono">Loading telemetry panels...</span>
+      <div className="flex-1 flex flex-col h-full bg-background">
+        <div className="h-14 border-b border-border bg-card/30 flex items-center px-6 animate-pulse">
+          <div className="h-5 w-48 bg-muted rounded-none" />
         </div>
-      </PageContainer>
+        <div className="flex-1 p-6 flex flex-col items-center justify-center space-y-3 text-muted-foreground text-xs animate-pulse">
+          <div className="size-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          <span className="font-mono">Loading dashboard workspace...</span>
+        </div>
+      </div>
     );
   }
 
   if (!dashboardData) {
     return (
-      <PageContainer
-        title="Dashboard Not Found"
-        breadcrumbs={[{ label: 'Sentinel', href: '/dashboard' }, { label: 'Dashboards', href: '/dashboards' }]}
-      >
-        <div className="py-16 text-center space-y-3">
-          <p className="text-sm text-muted-foreground">The requested custom dashboard does not exist.</p>
-          <Button size="sm" onClick={() => navigate('/dashboards')}>
-            Back to Dashboards
-          </Button>
-        </div>
-      </PageContainer>
+      <div className="p-8 text-center space-y-4">
+        <p className="text-sm text-muted-foreground">The requested custom dashboard does not exist.</p>
+        <button
+          onClick={() => navigate('/dashboards')}
+          className="px-3 py-1.5 text-xs bg-primary text-primary-foreground font-mono"
+        >
+          Back to Dashboards
+        </button>
+      </div>
     );
   }
 
   const { dashboard } = dashboardData;
 
+  // Filter widgets by global scope if configured
+  const displayedWidgets = widgets.filter((w) => {
+    const conf = (w.configuration as Record<string, any>) || {};
+    if (selectedApiId && conf.apiId && conf.apiId !== selectedApiId) return false;
+    if (selectedEnvironmentId && conf.environmentId && conf.environmentId !== selectedEnvironmentId) return false;
+    return true;
+  });
+
   return (
-    <PageContainer
-      title={dashboard.name}
-      description={dashboard.description || 'Custom Grafana-style observability dashboard.'}
-      breadcrumbs={[
-        { label: 'Sentinel', href: '/dashboard' },
-        { label: 'Dashboards', href: '/dashboards' },
-        { label: dashboard.name },
-      ]}
-      action={
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Global Time Range Selector */}
-          <select
-            value={timeRange}
-            onChange={(e) => setTimeRange(e.target.value)}
-            className="h-8 px-2 bg-input/20 border border-input rounded-none text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring"
-          >
-            <option value="15m">Last 15m</option>
-            <option value="1h">Last 1h</option>
-            <option value="6h">Last 6h</option>
-            <option value="24h">Last 24h</option>
-            <option value="7d">Last 7d</option>
-            <option value="30d">Last 30d</option>
-          </select>
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-background text-foreground">
+      {/* 1. Global Workspace Header */}
+      <DashboardHeader
+        title={dashboard.name}
+        description={dashboard.description || 'API Observability and Reliability Dashboard'}
+        apis={apis}
+        environments={environments}
+        selectedApiId={selectedApiId}
+        selectedEnvironmentId={selectedEnvironmentId}
+        timeRange={timeRange}
+        autoRefreshInterval={autoRefreshInterval}
+        isRefreshing={isRefreshing}
+        isEditMode={editMode}
+        saveStatus={saveStatus}
+        onSelectApi={setSelectedApiId}
+        onSelectEnvironment={setSelectedEnvironmentId}
+        onSelectTimeRange={setTimeRange}
+        onSelectAutoRefresh={setAutoRefreshInterval}
+        onRefresh={() => refreshTelemetry(true)}
+        onToggleEditMode={() => setEditMode(!editMode)}
+        onOpenAddDrawer={() => {
+          openRightDrawer();
+        }}
+      />
 
-          {/* Refresh Button */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => id && loadData(id, timeRange)}
-            disabled={isRefreshing}
-            className="h-8 gap-1.5 font-mono text-xs"
-          >
-            <HugeiconsIcon
-              icon={RefreshIcon}
-              className={`size-3.5 ${isRefreshing ? 'animate-spin' : ''}`}
-            />
-            <span className="hidden sm:inline">Refresh</span>
-          </Button>
-
-          {/* Edit Mode Toggle */}
-          <Button
-            variant={isEditMode ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => {
-              if (isEditMode && hasUnsavedLayout) {
-                handleSaveLayout();
-              }
-              setIsEditMode(!isEditMode);
+      {/* 2. Main Middle Workspace: Canvas + Right Drawer */}
+      <div className="flex-1 flex min-h-0 overflow-hidden relative">
+        {/* Main Canvas Scroll Area */}
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 min-w-0 bg-background/50 focus:outline-none">
+          <DashboardGrid
+            widgets={displayedWidgets}
+            isEditMode={editMode}
+            isLoading={isRefreshing}
+            onEditWidget={handleEditWidget}
+            onDeleteWidget={handleDeleteWidget}
+            onDuplicateWidget={handleDuplicateWidget}
+            onUpdateLayout={handleUpdateLayout}
+            onAddVisualization={() => {
+              openRightDrawer();
             }}
-            className="h-8 gap-1.5 font-medium"
-          >
-            <HugeiconsIcon icon={isEditMode ? Tick02Icon : Edit02Icon} className="size-3.5" />
-            <span>{isEditMode ? 'Done Editing' : 'Edit Dashboard'}</span>
-          </Button>
+          />
+        </main>
 
-          {/* Edit Mode Specific Action Buttons */}
-          {isEditMode && (
-            <>
-              {hasUnsavedLayout && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleSaveLayout}
-                  disabled={isSavingLayout}
-                  className="h-8 gap-1.5 text-primary border-primary/50 font-mono text-xs"
-                >
-                  <HugeiconsIcon icon={FloppyDiskIcon} className="size-3.5" />
-                  <span>{isSavingLayout ? 'Saving...' : 'Save Layout'}</span>
-                </Button>
-              )}
-
-              <Button
-                size="sm"
-                onClick={() => {
-                  setEditingWidget(null);
-                  setIsBuilderOpen(true);
-                }}
-                className="h-8 gap-1.5 font-medium"
-              >
-                <HugeiconsIcon icon={Add01Icon} className="size-3.5" />
-                <span>Add Visualization</span>
-              </Button>
-            </>
-          )}
-        </div>
-      }
-    >
-      <div className="space-y-4">
-        {/* Edit mode active banner */}
-        {isEditMode && (
-          <div className="p-2.5 bg-primary/10 border border-primary/30 flex items-center justify-between text-xs font-mono text-primary">
-            <div className="flex items-center gap-2">
-              <span className="size-2 rounded-full bg-primary animate-pulse" />
-              <span>EDIT MODE ACTIVE — Drag panels to reorder or use the panel menu to resize.</span>
-            </div>
-            {hasUnsavedLayout && (
-              <span className="text-[11px] underline cursor-pointer" onClick={handleSaveLayout}>
-                Unsaved layout changes (Click to Save)
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Dynamic 12-Column Layout Grid */}
-        <DashboardGrid
-          widgets={widgets}
-          isEditMode={isEditMode}
-          isLoading={isRefreshing}
-          onEditWidget={(widget) => {
-            setEditingWidget(widget);
-            setIsBuilderOpen(true);
-          }}
-          onDeleteWidget={handleDeleteWidget}
-          onDuplicateWidget={handleDuplicateWidget}
-          onUpdateLayout={handleLayoutChange}
-          onAddVisualization={() => {
-            setEditingWidget(null);
-            setIsBuilderOpen(true);
+        {/* 3. Right-Side Visualization Drawer */}
+        <VisualizationDrawer
+          isOpen={rightDrawerOpen}
+          width={rightDrawerWidth}
+          catalog={catalog}
+          projectId={dashboard.projectId}
+          defaultApiId={selectedApiId}
+          defaultEnvironmentId={selectedEnvironmentId}
+          timeRange={timeRange}
+          onClose={closeRightDrawer}
+          onResize={setRightDrawerWidth}
+          onAddWidget={handleAddWidget}
+          onConfigureQuery={(draft) => {
+            setDraftWidget(draft);
+            setSelectedWidgetId(null);
+            openBottomPane();
           }}
         />
       </div>
 
-      {/* Visualization Builder Dialog */}
-      <VisualizationBuilderDialog
-        open={isBuilderOpen}
-        onOpenChange={setIsBuilderOpen}
-        initialWidget={editingWidget}
-        projectId={dashboard.projectId}
-        onSave={handleSaveWidget}
+      {/* 4. Bottom Query / Metric Configuration Pane */}
+      <QueryPane
+        isOpen={bottomPaneOpen}
+        isCollapsed={bottomPaneCollapsed}
+        height={bottomPaneHeight}
+        catalog={catalog}
+        apis={apis}
+        environments={environments}
+        monitors={monitors}
+        activeWidget={activeEditingWidget}
+        draftWidget={draftWidget}
+        onResize={setBottomPaneHeight}
+        onToggleCollapse={toggleBottomPaneCollapse}
+        onClose={closeBottomPane}
+        onSaveWidget={handleSaveWidgetFromBottomPane}
+        onChangeDraft={setDraftWidget}
       />
-    </PageContainer>
+    </div>
   );
 }

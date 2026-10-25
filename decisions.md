@@ -588,5 +588,48 @@ Implement a flexible, configuration-driven dashboard and visualization engine wh
 **Date:**
 2026-10-25
 
+---
+
+## ADR-020: Grafana-Style Interactive Observability Workspace Architecture
+
+**Decision:**
+Redesign the Sentinel dashboard into a **Grafana-inspired, highly interactive observability workspace**. The workspace comprises four independently adjustable regions:
+1. **Collapsible & Resizable Sidebar**: Toggles between expanded (`256px` default, resizable between `200px` and `380px`) and collapsed (`64px` icon-only with accessible tooltips). Width and collapsed state persist in `localStorage`.
+2. **Main Dashboard Canvas with Edit/View Modes**: 12-column grid supporting draggable panels, corner/edge resizing, contextual widget menus (Edit, Duplicate, Delete), and independent widget loading boundaries.
+3. **Right-Side Sliding Visualization Drawer**: Slides in smoothly on "+ Add visualization", resizable horizontally (`320px` to `720px`), featuring a searchable metric catalog, instant live telemetry query preview, and visualization switcher.
+4. **Bottom Vertically Resizable Query/Metric Configuration Pane**: Opens on widget editing or deep configuration, resizable vertically (`160px` to `520px`), collapsible to an unobtrusive toolbar, allowing real-time query parameter tuning (API, Environment, Monitor, Visualization Type, Time Range).
+5. **Debounced Layout Autosave (600ms)**: Layout coordinates `(x, y, width, height)` are debounced locally and committed via `PATCH /api/v1/dashboards/:id/layout` with a non-intrusive status indicator (`✓ Saved`, `Saving...`, `Couldn't save`).
+6. **Strict Pane Exclusivity**: Workspace enforces maximum one active right drawer and one active bottom configuration pane, preventing nested drawer/modal cascades.
+
+**Reason:**
+- **In-Context Observability vs Context Switching**: Professional observability workflows require tuning queries and inspecting live previews without leaving the dashboard or losing visual reference to adjacent widgets.
+- **Native PointerCapture Resizing**: Legacy grid and panel libraries depend on `findDOMNode` or outdated React internals incompatible with React 19. A lightweight, accessible `ResizeHandle` using native `PointerEvents` and `setPointerCapture` provides 60fps buttery-smooth resizing across horizontal and vertical splitters with zero dependency risk.
+- **Separation of Workspace UI State from Persisted Telemetry**: UI transient state (sidebar width, drawer visibility, bottom pane height, edit mode) is encapsulated in `useWorkspaceState` and `localStorage`, cleanly decoupled from `DashboardDataResponse` and database-persisted `DashboardWidget` entities.
+- **Safe Network Consumption via Debouncing**: Dragging and resizing fire high-frequency pointer updates. Debouncing layout commits by 600ms prevents network storms while guaranteeing immediate UI feedback.
+- **Graceful Failure Isolation**: Each widget renders within its own error boundary and loading skeleton. A failure in one metric query never breaks the rest of the workspace canvas.
+
+**Alternatives considered:**
+- *Full-page route navigation for widget configuration (`/dashboards/:id/widgets/new`)*:
+  - *Why rejected*: Forcing full-page navigation interrupts user inspection, destroys transient dashboard filters, and makes comparing new visualizations against existing dashboard panels impossible.
+- *Unconstrained multi-drawer / modal stacking*:
+  - *Why rejected*: Spawning drawers from drawers leads to severe UX confusion, z-index bugs, and mobile screen obstruction.
+- *Synchronous per-pixel layout persistence*:
+  - *Why rejected*: Floods NestJS and PostgreSQL with hundreds of PATCH requests per second during drag/resize interactions.
+- *Third-party React grid libraries*:
+  - *Why rejected*: Most popular npm packages (e.g. older react-grid-layout versions) fail under React 19 due to deprecated lifecycle methods and `findDOMNode` removals.
+
+**Tradeoffs accepted:**
+- Managing custom pointer drag math and clamping logic requires explicit minimum/maximum dimension bounds in workspace state.
+- Coordinated draft state must be synchronized between the right drawer and bottom pane when switching between quick metric selection and deep query editing.
+
+**Consequences:**
+- The Sentinel dashboard behaves as a high-performance, information-dense observability workspace.
+- Users can smoothly adjust workspace regions, customize telemetry panels, and inspect metrics in real time.
+- All visualization panels continue to query real telemetry through `MetricQueryService` with zero fake data.
+
+**Date:**
+2026-10-25
+
+
 
 

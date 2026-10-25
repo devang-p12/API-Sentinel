@@ -64,7 +64,7 @@ export function DashboardGrid({
     );
   }
 
-  // Column span class helper
+  // Column span helper
   const getColSpanClass = (w: number) => {
     switch (w) {
       case 12:
@@ -117,7 +117,6 @@ export function DashboardGrid({
     const [moved] = reordered.splice(sourceIndex, 1);
     reordered.splice(targetIndex, 0, moved);
 
-    // Recompute sequential coordinates
     const updated = reordered.map((w, idx) => ({
       ...w,
       x: (idx * 6) % 12,
@@ -128,13 +127,14 @@ export function DashboardGrid({
     setDraggedWidgetId(null);
   };
 
-  // Widget layout adjusters
+  // Adjust width with bounds check [3..12]
   const handleAdjustWidth = (widget: DashboardWidget, delta: number) => {
     const newWidth = Math.min(12, Math.max(3, (widget.width || 6) + delta));
     const updated = widgets.map((w) => (w.id === widget.id ? { ...w, width: newWidth } : w));
     onUpdateLayout(updated);
   };
 
+  // Shift position left / right
   const handleShiftPosition = (widget: DashboardWidget, direction: 'left' | 'right') => {
     const idx = widgets.findIndex((w) => w.id === widget.id);
     if (idx === -1) return;
@@ -154,8 +154,20 @@ export function DashboardGrid({
     onUpdateLayout(updated);
   };
 
+  // Corner resize drag handler for fine adjustments
+  const handleCornerResize = (widget: DashboardWidget, deltaX: number) => {
+    if (Math.abs(deltaX) > 25) {
+      const step = deltaX > 0 ? 1 : -1;
+      const newWidth = Math.min(12, Math.max(3, (widget.width || 6) + step));
+      if (newWidth !== widget.width) {
+        const updated = widgets.map((w) => (w.id === widget.id ? { ...w, width: newWidth } : w));
+        onUpdateLayout(updated);
+      }
+    }
+  };
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pb-12">
       {widgets.map((widget) => {
         const colSpan = getColSpanClass(widget.width || 6);
         const isMenuOpen = activeMenuId === widget.id;
@@ -174,14 +186,17 @@ export function DashboardGrid({
             }`}
           >
             <Card
-              className={`rounded-none border-border bg-card shadow-none h-full flex flex-col min-h-[190px] overflow-hidden ${
-                isEditMode ? 'border-dashed border-primary/40 bg-card/80' : ''
+              className={`rounded-none border-border bg-card shadow-none h-full flex flex-col min-h-[200px] overflow-hidden ${
+                isEditMode ? 'border-dashed border-primary/50 bg-card/90 shadow-sm' : ''
               }`}
             >
-              <CardHeader className="py-2.5 px-3 border-b border-border/40 bg-muted/20 flex flex-row items-center justify-between space-y-0">
+              <CardHeader className="py-2.5 px-3 border-b border-border/40 bg-muted/20 flex flex-row items-center justify-between space-y-0 shrink-0">
                 <div className="flex items-center gap-2 min-w-0">
                   {isEditMode && (
-                    <span className="text-muted-foreground hover:text-foreground cursor-grab">
+                    <span
+                      title="Drag to reposition panel"
+                      className="text-muted-foreground hover:text-foreground cursor-grab active:cursor-grabbing"
+                    >
                       <HugeiconsIcon icon={DragDropIcon} className="size-3.5" />
                     </span>
                   )}
@@ -195,118 +210,163 @@ export function DashboardGrid({
                     {widget.visualizationType}
                   </Badge>
 
-                  {isEditMode && (
-                    <div className="relative">
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => setActiveMenuId(isMenuOpen ? null : widget.id)}
-                        className="h-6 w-6 p-0"
+                  {/* Contextual Toolbar Menu */}
+                  <div className="relative">
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => setActiveMenuId(isMenuOpen ? null : widget.id)}
+                      className="size-6 p-0 text-muted-foreground hover:text-foreground"
+                      title="Panel actions"
+                    >
+                      <HugeiconsIcon icon={MoreVerticalIcon} className="size-3.5" />
+                    </Button>
+
+                    {isMenuOpen && (
+                      <div
+                        className="absolute right-0 top-7 z-50 w-44 bg-card border border-border shadow-xl p-1 text-xs font-mono space-y-0.5"
+                        onMouseLeave={() => setActiveMenuId(null)}
                       >
-                        <HugeiconsIcon icon={MoreVerticalIcon} className="size-3.5" />
-                      </Button>
-
-                      {isMenuOpen && (
-                        <div
-                          className="absolute right-0 top-7 z-50 w-44 bg-card border border-border shadow-lg p-1 text-xs font-mono space-y-0.5"
-                          onMouseLeave={() => setActiveMenuId(null)}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveMenuId(null);
+                            onEditWidget(widget);
+                          }}
+                          className="w-full text-left px-2 py-1.5 hover:bg-muted flex items-center gap-2 text-foreground"
                         >
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setActiveMenuId(null);
-                              onEditWidget(widget);
-                            }}
-                            className="w-full text-left px-2 py-1.5 hover:bg-muted flex items-center gap-2 text-foreground"
-                          >
-                            <HugeiconsIcon icon={Edit02Icon} className="size-3.5 text-primary" />
-                            <span>Edit Panel</span>
-                          </button>
+                          <HugeiconsIcon icon={Edit02Icon} className="size-3.5 text-primary" />
+                          <span>Edit Query</span>
+                        </button>
 
-                          <div className="border-t border-border/50 my-1" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveMenuId(null);
+                            onDuplicateWidget(widget);
+                          }}
+                          className="w-full text-left px-2 py-1.5 hover:bg-muted flex items-center gap-2 text-foreground"
+                        >
+                          <HugeiconsIcon icon={Copy01Icon} className="size-3.5" />
+                          <span>Duplicate</span>
+                        </button>
 
-                          <div className="px-2 py-1 text-[10px] text-muted-foreground uppercase font-semibold">
-                            Width: {widget.width || 6}/12
-                          </div>
-                          <div className="grid grid-cols-2 gap-1 px-1">
-                            <button
-                              type="button"
-                              onClick={() => handleAdjustWidth(widget, -2)}
-                              className="px-1.5 py-1 text-[11px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1"
-                              disabled={(widget.width || 6) <= 3}
-                            >
-                              <HugeiconsIcon icon={Minimize01Icon} className="size-3" />
-                              <span>Narrow</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleAdjustWidth(widget, 2)}
-                              className="px-1.5 py-1 text-[11px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1"
-                              disabled={(widget.width || 6) >= 12}
-                            >
-                              <HugeiconsIcon icon={Maximize01Icon} className="size-3" />
-                              <span>Wider</span>
-                            </button>
-                          </div>
+                        {isEditMode && (
+                          <>
+                            <div className="border-t border-border/50 my-1" />
 
-                          <div className="border-t border-border/50 my-1" />
+                            <div className="px-2 py-0.5 text-[9px] text-muted-foreground uppercase font-semibold">
+                              Width: {widget.width || 6}/12
+                            </div>
+                            <div className="grid grid-cols-2 gap-1 px-1">
+                              <button
+                                type="button"
+                                onClick={() => handleAdjustWidth(widget, -2)}
+                                className="px-1.5 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1"
+                                disabled={(widget.width || 6) <= 3}
+                              >
+                                <HugeiconsIcon icon={Minimize01Icon} className="size-3" />
+                                <span>Narrow</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleAdjustWidth(widget, 2)}
+                                className="px-1.5 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1"
+                                disabled={(widget.width || 6) >= 12}
+                              >
+                                <HugeiconsIcon icon={Maximize01Icon} className="size-3" />
+                                <span>Wider</span>
+                              </button>
+                            </div>
 
-                          <div className="px-2 py-1 text-[10px] text-muted-foreground uppercase font-semibold">
-                            Reorder
-                          </div>
-                          <div className="grid grid-cols-2 gap-1 px-1">
-                            <button
-                              type="button"
-                              onClick={() => handleShiftPosition(widget, 'left')}
-                              className="px-1.5 py-1 text-[11px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1"
-                            >
-                              <HugeiconsIcon icon={ArrowLeft01Icon} className="size-3" />
-                              <span>Move Left</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleShiftPosition(widget, 'right')}
-                              className="px-1.5 py-1 text-[11px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1"
-                            >
-                              <HugeiconsIcon icon={ArrowRight01Icon} className="size-3" />
-                              <span>Move Right</span>
-                            </button>
-                          </div>
+                            <div className="border-t border-border/50 my-1" />
 
-                          <div className="border-t border-border/50 my-1" />
+                            <div className="px-2 py-0.5 text-[9px] text-muted-foreground uppercase font-semibold">
+                              Position
+                            </div>
+                            <div className="grid grid-cols-2 gap-1 px-1">
+                              <button
+                                type="button"
+                                onClick={() => handleShiftPosition(widget, 'left')}
+                                className="px-1.5 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1"
+                              >
+                                <HugeiconsIcon icon={ArrowLeft01Icon} className="size-3" />
+                                <span>Move Left</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleShiftPosition(widget, 'right')}
+                                className="px-1.5 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1"
+                              >
+                                <HugeiconsIcon icon={ArrowRight01Icon} className="size-3" />
+                                <span>Move Right</span>
+                              </button>
+                            </div>
+                          </>
+                        )}
 
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setActiveMenuId(null);
-                              onDuplicateWidget(widget);
-                            }}
-                            className="w-full text-left px-2 py-1.5 hover:bg-muted flex items-center gap-2 text-foreground"
-                          >
-                            <HugeiconsIcon icon={Copy01Icon} className="size-3.5" />
-                            <span>Duplicate</span>
-                          </button>
+                        <div className="border-t border-border/50 my-1" />
 
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setActiveMenuId(null);
-                              onDeleteWidget(widget.id);
-                            }}
-                            className="w-full text-left px-2 py-1.5 hover:bg-destructive/10 text-destructive flex items-center gap-2"
-                          >
-                            <HugeiconsIcon icon={Delete02Icon} className="size-3.5" />
-                            <span>Remove Panel</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveMenuId(null);
+                            onDeleteWidget(widget.id);
+                          }}
+                          className="w-full text-left px-2 py-1.5 hover:bg-destructive/10 text-destructive flex items-center gap-2"
+                        >
+                          <HugeiconsIcon icon={Delete02Icon} className="size-3.5" />
+                          <span>Delete Panel</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </CardHeader>
 
-              <CardContent className="p-0 flex-1 flex flex-col">
-                <WidgetRenderer widget={widget} isLoading={isLoading} />
+              {/* Card Body with Independent Error Handling */}
+              <CardContent className="p-0 flex-1 flex flex-col relative">
+                {isLoading && !widget.data ? (
+                  <div className="p-6 flex flex-col items-center justify-center h-full space-y-2 text-muted-foreground animate-pulse">
+                    <div className="h-4 w-28 bg-muted rounded-none" />
+                    <div className="h-10 w-44 bg-muted/60 rounded-none" />
+                    <div className="h-3 w-32 bg-muted/40 rounded-none" />
+                  </div>
+                ) : (
+                  <WidgetRenderer widget={widget} isLoading={isLoading} />
+                )}
+
+                {/* Bottom-right interactive corner resize handle in edit mode */}
+                {isEditMode && (
+                  <div
+                    title="Drag corner to resize width"
+                    className="absolute right-0 bottom-0 size-4 cursor-se-resize flex items-end justify-end p-0.5 text-primary opacity-60 hover:opacity-100"
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const startX = e.clientX;
+                      const target = e.target as HTMLElement;
+                      target.setPointerCapture(e.pointerId);
+
+                      const onMove = (ev: PointerEvent) => {
+                        const delta = ev.clientX - startX;
+                        handleCornerResize(widget, delta);
+                      };
+
+                      const onUp = () => {
+                        window.removeEventListener('pointermove', onMove);
+                        window.removeEventListener('pointerup', onUp);
+                      };
+
+                      window.addEventListener('pointermove', onMove);
+                      window.addEventListener('pointerup', onUp);
+                    }}
+                  >
+                    <svg viewBox="0 0 10 10" className="size-2.5 fill-current">
+                      <path d="M 9 1 L 9 9 L 1 9 Z" />
+                    </svg>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

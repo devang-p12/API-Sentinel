@@ -1144,3 +1144,180 @@ Returns HTTP 200 OK: { success: true, count: N }
 Frontend UI confirms layout saved and reflects persisted coordinates on page refresh
 ```
 
+---
+
+## 5. Grafana-Style Interactive Workspace Execution Flows
+
+### Flow 5.1: Right-Side Visualization Drawer & Metric Selection with Live Preview
+
+```text
+1. User clicks [+ Add visualization] in DashboardHeader:
+   frontend/src/components/dashboards/workspace/DashboardHeader.tsx
+      │  onOpenAddDrawer() triggers
+      ▼
+   frontend/src/components/dashboards/workspace/useWorkspaceState.ts
+      │  openRightDrawer() sets rightDrawerOpen = true
+      ▼
+   frontend/src/components/dashboards/workspace/VisualizationDrawer.tsx
+      │  Drawer slides in from the right edge with width = rightDrawerWidth (default: 440px)
+      │  User drags left border ResizeHandle to adjust width (320px - 720px)
+
+2. User searches or selects a metric (e.g. "p95_latency"):
+   User types in search bar / clicks "P95 Latency" from Performance category
+      │
+      ▼
+   VisualizationDrawer triggers live preview query:
+   Frontend API Client: api.previewMetricQuery({
+     metric: "p95_latency",
+     filters: { projectId, apiId: defaultApiId, environmentId: defaultEnvironmentId },
+     timeRange: "24h"
+   })
+      │  Dispatches: POST /api/v1/dashboards/preview
+      ▼
+   NestJS DashboardsController.previewQuery() ──► MetricQueryService.query()
+      │  Resolves PostgreSQL monitor_executions within time window
+      │  Calculates summary percentiles and dynamic bucketed timeSeries points
+      ▼
+   Returns HTTP 200/201 OK: { metric: "p95_latency", unit: "ms", summary, timeSeries }
+      │
+      ▼
+   VisualizationDrawer immediately mounts <WidgetRenderer /> preview
+   User toggles visualization type (Stat / Time Series / Bar / Gauge / Table)
+   Preview updates instantly with live data
+
+3. Direct Commit or Configure Query:
+   Option A: User clicks [Add Panel to Dashboard]
+      │  Invokes onAddWidget()
+      │  POST /api/v1/dashboards/:id/widgets
+      │  Refreshes dashboard telemetry; widget appears on canvas
+      │  Drawer closes
+      │
+   Option B: User clicks [Configure Query...]
+      │  Invokes onConfigureQuery(draft)
+      │  Passes draft widget state to QueryPane
+      │  Closes right drawer, opens bottom QueryPane for deep filter customization
+```
+
+---
+
+### Flow 5.2: In-Context Bottom Metric / Query Pane Configuration
+
+```text
+1. User clicks "Edit" in widget menu OR clicks "Configure Query" from drawer:
+   frontend/src/pages/DashboardViewPage.tsx:
+      handleEditWidget(widget)
+         │  Sets selectedWidgetId = widget.id
+         │  Populates draftWidget with current configuration
+         ▼
+      openBottomPane(widget.id) in useWorkspaceState
+         │  Sets bottomPaneOpen = true, bottomPaneHeight = 320px
+         ▼
+      frontend/src/components/dashboards/workspace/QueryPane.tsx mounts
+
+2. In-Context Parameter Customization:
+   User adjusts controls without navigating away:
+      - Title Input
+      - Metric dropdown (Availability, P50, P95, P99 Latency, Error Rate, Status Distribution, etc.)
+      - API dropdown
+      - Environment dropdown
+      - Monitor dropdown
+      - Visualization type
+      - Time window
+      - Column width (3, 4, 6, 8, 12 cols)
+
+3. Synchronized Live Draft Preview:
+   Every parameter change fires handleFieldChange():
+      │  Updates QueryPane local draft
+      ▼
+   onChangeDraft(draft)
+      │  Updates parent DashboardViewPage draftWidget state
+      ▼
+   Main dashboard canvas updates live preview immediately while user tunes filters
+
+4. Vertical Resize & Collapse:
+   - User drags top border ResizeHandle to smoothly resize height (160px - 520px)
+   - User clicks collapse button to minimize QueryPane into an unobtrusive status bar
+
+5. Apply & Persist Changes:
+   User clicks [Apply & Save Changes]:
+      │
+      ▼
+   onSaveWidget() in DashboardViewPage.tsx:
+      ├── If editing existing widget:
+      │   PATCH /api/v1/dashboards/:id/widgets/:widgetId
+      │   Updates widget record in PostgreSQL
+      │
+      └── If creating new panel:
+          POST /api/v1/dashboards/:id/widgets
+          Inserts new widget record at bottom row
+      │
+      ▼
+   closeBottomPane() resets active selection
+   refreshTelemetry() re-queries fresh data for all widgets
+   Save status displays "✓ Saved"
+```
+
+---
+
+### Flow 5.3: Drag, Resize & Debounced Layout Autosave Flow
+
+```text
+1. User enters Edit Mode:
+   User clicks [Edit] button in DashboardHeader
+      │  isEditMode becomes true
+      ▼
+   DashboardGrid enables interactive drag handles and corner resize controls
+
+2. User drags widget to new position or resizes corner:
+   User drags widget header handle:
+      │  Local grid state immediately updates widget coordinates (x, y)
+      │  Grid reflows and aligns to 12-column track
+      │  Zero layout jumping or screen freezing
+      ▼
+   User drags corner resize handle:
+      │  Local grid state immediately updates width and height
+      │  Inner SVG/canvas charts adapt via responsive ResizeObserver
+
+3. Debounced Persistence (600ms):
+   Every drag/resize event invokes handleUpdateLayout(updatedWidgets):
+      │
+      ├── 1. Updates React local state setWidgets(updatedWidgets)
+      ├── 2. Updates save indicator: setSaveStatus('saving') ("Saving...")
+      ├── 3. Clears existing saveLayoutTimerRef timeout
+      └── 4. Starts 600ms debounce timer
+             │
+             ▼ (after 600ms without new pointer movement)
+   api.updateDashboardLayout(id, layoutPayload):
+      Dispatches: PATCH /api/v1/dashboards/:id/layout
+      Headers: { "Content-Type": "application/json" }
+      Body: { layout: [{ id, x, y, width, height }, ...] }
+         │
+         ▼
+   NestJS DashboardsController.updateLayout()
+      │  Executes Prisma $transaction updating all widget positions
+      ▼
+   Returns HTTP 200 OK: { success: true, count: N }
+      │
+      ▼
+   Frontend updates save indicator: setSaveStatus('saved') ("✓ Saved")
+   On full browser reload, all widget positions and dimensions persist identically
+```
+
+---
+
+### Flow 5.4: Workspace Multi-Pane Coordination & Exclusivity
+
+```text
+Rule: Workspace maintains maximum ONE active right drawer and ONE active bottom pane.
+
+Scenario A: Drawer is open, user clicks "Edit Widget" on a dashboard card:
+   - DashboardViewPage.handleEditWidget() invokes openBottomPane()
+   - Workspace state closes right drawer and expands bottom query pane
+   - No stacked or obscured modal layers
+
+Scenario B: Bottom query pane is open, user clicks "+ Add visualization":
+   - DashboardHeader.onOpenAddDrawer() invokes openRightDrawer()
+   - Workspace retains clean visual focus on the metric catalog
+   - When user clicks "Configure Query" in the drawer, bottom pane takes focus
+
+
