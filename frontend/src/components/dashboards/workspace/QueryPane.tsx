@@ -15,6 +15,8 @@ import {
   Cancel01Icon,
   ArrowUp01Icon,
   ArrowDown01Icon,
+  ArrowLeft01Icon,
+  ArrowRight01Icon,
   Tick02Icon,
   Settings02Icon,
 } from '@hugeicons/core-free-icons';
@@ -326,17 +328,29 @@ export function QueryPane({
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1.5">
                 <span className="text-muted-foreground text-[11px]">Width:</span>
-                <select
-                  value={width}
-                  onChange={(e) => handleFieldChange({ width: Number(e.target.value) })}
-                  className="h-7 px-2 bg-input/20 border border-input rounded-none text-xs text-foreground"
-                >
-                  <option value={12}>Full (12 cols)</option>
-                  <option value={8}>Two-Thirds (8 cols)</option>
-                  <option value={6}>Half (6 cols)</option>
-                  <option value={4}>One-Third (4 cols)</option>
-                  <option value={3}>Quarter (3 cols)</option>
-                </select>
+                <div className="flex items-center border border-input bg-input/20">
+                  <button
+                    type="button"
+                    title="Shrink width (← arrow)"
+                    onClick={() => handleFieldChange({ width: Math.max(3, width - 1) })}
+                    disabled={width <= 3}
+                    className="size-7 flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+                  >
+                    <HugeiconsIcon icon={ArrowLeft01Icon} className="size-3.5" />
+                  </button>
+                  <span className="px-2 text-xs font-mono font-semibold text-foreground select-none">
+                    {width}/12 cols
+                  </span>
+                  <button
+                    type="button"
+                    title="Expand width (→ arrow)"
+                    onClick={() => handleFieldChange({ width: Math.min(12, width + 1) })}
+                    disabled={width >= 12}
+                    className="size-7 flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+                  >
+                    <HugeiconsIcon icon={ArrowRight01Icon} className="size-3.5" />
+                  </button>
+                </div>
               </div>
 
               <div className="flex items-center gap-1.5">

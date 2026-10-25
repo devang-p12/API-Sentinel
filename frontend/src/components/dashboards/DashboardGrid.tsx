@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, type DragEvent, type KeyboardEvent } from 'react';
 import type { DashboardWidget } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,8 +12,8 @@ import {
   Copy01Icon,
   ArrowLeft01Icon,
   ArrowRight01Icon,
-  Maximize01Icon,
-  Minimize01Icon,
+  ArrowUp01Icon,
+  ArrowDown01Icon,
   DragDropIcon,
   Add01Icon,
 } from '@hugeicons/core-free-icons';
@@ -69,6 +69,8 @@ export function DashboardGrid({
     switch (w) {
       case 12:
         return 'md:col-span-12';
+      case 11:
+        return 'md:col-span-11';
       case 10:
         return 'md:col-span-10';
       case 9:
@@ -90,20 +92,20 @@ export function DashboardGrid({
   };
 
   // Drag & drop handlers
-  const handleDragStart = (e: React.DragEvent, id: string) => {
+  const handleDragStart = (e: DragEvent, id: string) => {
     if (!isEditMode) return;
     setDraggedWidgetId(id);
     e.dataTransfer.setData('text/plain', id);
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = (e: DragEvent) => {
     if (!isEditMode) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
   };
 
-  const handleDrop = (e: React.DragEvent, targetId: string) => {
+  const handleDrop = (e: DragEvent, targetId: string) => {
     if (!isEditMode) return;
     e.preventDefault();
     const sourceId = draggedWidgetId || e.dataTransfer.getData('text/plain');
@@ -127,10 +129,21 @@ export function DashboardGrid({
     setDraggedWidgetId(null);
   };
 
-  // Adjust width with bounds check [3..12]
+  // Direct Arrow Adjust Width [3..12]
   const handleAdjustWidth = (widget: DashboardWidget, delta: number) => {
-    const newWidth = Math.min(12, Math.max(3, (widget.width || 6) + delta));
+    const currentW = widget.width || 6;
+    const newWidth = Math.min(12, Math.max(3, currentW + delta));
+    if (newWidth === currentW) return;
     const updated = widgets.map((w) => (w.id === widget.id ? { ...w, width: newWidth } : w));
+    onUpdateLayout(updated);
+  };
+
+  // Direct Arrow Adjust Height [2..8]
+  const handleAdjustHeight = (widget: DashboardWidget, delta: number) => {
+    const currentH = widget.height || 3;
+    const newHeight = Math.min(8, Math.max(2, currentH + delta));
+    if (newHeight === currentH) return;
+    const updated = widgets.map((w) => (w.id === widget.id ? { ...w, height: newHeight } : w));
     onUpdateLayout(updated);
   };
 
@@ -154,18 +167,6 @@ export function DashboardGrid({
     onUpdateLayout(updated);
   };
 
-  // Corner resize drag handler for fine adjustments
-  const handleCornerResize = (widget: DashboardWidget, deltaX: number) => {
-    if (Math.abs(deltaX) > 25) {
-      const step = deltaX > 0 ? 1 : -1;
-      const newWidth = Math.min(12, Math.max(3, (widget.width || 6) + step));
-      if (newWidth !== widget.width) {
-        const updated = widgets.map((w) => (w.id === widget.id ? { ...w, width: newWidth } : w));
-        onUpdateLayout(updated);
-      }
-    }
-  };
-
   return (
     <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pb-12">
       {widgets.map((widget) => {
@@ -179,16 +180,34 @@ export function DashboardGrid({
             onDragStart={(e) => handleDragStart(e, widget.id)}
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, widget.id)}
+            onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
+              if (!isEditMode) return;
+              if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                handleAdjustWidth(widget, -1);
+              } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                handleAdjustWidth(widget, 1);
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                handleAdjustHeight(widget, -1);
+              } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                handleAdjustHeight(widget, 1);
+              }
+            }}
+            tabIndex={isEditMode ? 0 : undefined}
             className={`col-span-12 ${colSpan} transition-all duration-200 relative group flex flex-col ${
               isEditMode
-                ? 'cursor-grab active:cursor-grabbing hover:ring-1 hover:ring-primary/60'
+                ? 'cursor-grab active:cursor-grabbing hover:ring-1 hover:ring-primary/60 focus:ring-1 focus:ring-primary focus:outline-none'
                 : ''
             }`}
           >
             <Card
-              className={`rounded-none border-border bg-card shadow-none h-full flex flex-col min-h-[200px] overflow-hidden ${
+              className={`rounded-none border-border bg-card shadow-none h-full flex flex-col overflow-hidden relative ${
                 isEditMode ? 'border-dashed border-primary/50 bg-card/90 shadow-sm' : ''
               }`}
+              style={{ minHeight: `${(widget.height || 3) * 75 + 60}px` }}
             >
               <CardHeader className="py-2.5 px-3 border-b border-border/40 bg-muted/20 flex flex-row items-center justify-between space-y-0 shrink-0">
                 <div className="flex items-center gap-2 min-w-0">
@@ -206,6 +225,79 @@ export function DashboardGrid({
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
+                  {/* DIRECT ARROW RESIZE CONTROLS (Edit Mode) */}
+                  {isEditMode && (
+                    <div className="flex items-center gap-1">
+                      {/* Width Arrow Control: [ ← ] 6/12 [ → ] */}
+                      <div
+                        className="flex items-center border border-border bg-card text-[10px] font-mono shadow-xs"
+                        title="Resize panel width with arrows"
+                      >
+                        <button
+                          type="button"
+                          title="Shrink width (← arrow)"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAdjustWidth(widget, -1);
+                          }}
+                          disabled={(widget.width || 6) <= 3}
+                          className="size-5 flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors"
+                        >
+                          <HugeiconsIcon icon={ArrowLeft01Icon} className="size-3" />
+                        </button>
+                        <span className="px-1 text-[9px] font-semibold text-foreground select-none">
+                          {widget.width || 6}/12
+                        </span>
+                        <button
+                          type="button"
+                          title="Expand width (→ arrow)"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAdjustWidth(widget, 1);
+                          }}
+                          disabled={(widget.width || 6) >= 12}
+                          className="size-5 flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors"
+                        >
+                          <HugeiconsIcon icon={ArrowRight01Icon} className="size-3" />
+                        </button>
+                      </div>
+
+                      {/* Height Arrow Control: [ ↑ ] 3h [ ↓ ] */}
+                      <div
+                        className="flex items-center border border-border bg-card text-[10px] font-mono shadow-xs"
+                        title="Resize panel height with arrows"
+                      >
+                        <button
+                          type="button"
+                          title="Shrink height (↑ arrow)"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAdjustHeight(widget, -1);
+                          }}
+                          disabled={(widget.height || 3) <= 2}
+                          className="size-5 flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors"
+                        >
+                          <HugeiconsIcon icon={ArrowUp01Icon} className="size-3" />
+                        </button>
+                        <span className="px-1 text-[9px] font-semibold text-foreground select-none">
+                          {widget.height || 3}h
+                        </span>
+                        <button
+                          type="button"
+                          title="Expand height (↓ arrow)"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAdjustHeight(widget, 1);
+                          }}
+                          disabled={(widget.height || 3) >= 8}
+                          className="size-5 flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors"
+                        >
+                          <HugeiconsIcon icon={ArrowDown01Icon} className="size-3" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <Badge variant="outline" className="text-[10px] font-mono px-1 py-0 uppercase">
                     {widget.visualizationType}
                   </Badge>
@@ -224,7 +316,7 @@ export function DashboardGrid({
 
                     {isMenuOpen && (
                       <div
-                        className="absolute right-0 top-7 z-50 w-44 bg-card border border-border shadow-xl p-1 text-xs font-mono space-y-0.5"
+                        className="absolute right-0 top-7 z-50 w-48 bg-card border border-border shadow-xl p-1 text-xs font-mono space-y-0.5"
                         onMouseLeave={() => setActiveMenuId(null)}
                       >
                         <button
@@ -256,26 +348,56 @@ export function DashboardGrid({
                             <div className="border-t border-border/50 my-1" />
 
                             <div className="px-2 py-0.5 text-[9px] text-muted-foreground uppercase font-semibold">
-                              Width: {widget.width || 6}/12
+                              Resize Width (← / →)
                             </div>
-                            <div className="grid grid-cols-2 gap-1 px-1">
+                            <div className="flex items-center gap-1 px-1">
                               <button
                                 type="button"
-                                onClick={() => handleAdjustWidth(widget, -2)}
-                                className="px-1.5 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1"
+                                onClick={() => handleAdjustWidth(widget, -1)}
+                                className="flex-1 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1 text-foreground disabled:opacity-30"
                                 disabled={(widget.width || 6) <= 3}
                               >
-                                <HugeiconsIcon icon={Minimize01Icon} className="size-3" />
-                                <span>Narrow</span>
+                                <HugeiconsIcon icon={ArrowLeft01Icon} className="size-3" />
+                                <span>Shrink</span>
                               </button>
+                              <span className="text-[10px] font-mono px-1 font-semibold text-foreground">
+                                {widget.width || 6}/12
+                              </span>
                               <button
                                 type="button"
-                                onClick={() => handleAdjustWidth(widget, 2)}
-                                className="px-1.5 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1"
+                                onClick={() => handleAdjustWidth(widget, 1)}
+                                className="flex-1 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1 text-foreground disabled:opacity-30"
                                 disabled={(widget.width || 6) >= 12}
                               >
-                                <HugeiconsIcon icon={Maximize01Icon} className="size-3" />
-                                <span>Wider</span>
+                                <span>Expand</span>
+                                <HugeiconsIcon icon={ArrowRight01Icon} className="size-3" />
+                              </button>
+                            </div>
+
+                            <div className="px-2 py-0.5 text-[9px] text-muted-foreground uppercase font-semibold mt-1">
+                              Resize Height (↑ / ↓)
+                            </div>
+                            <div className="flex items-center gap-1 px-1">
+                              <button
+                                type="button"
+                                onClick={() => handleAdjustHeight(widget, -1)}
+                                className="flex-1 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1 text-foreground disabled:opacity-30"
+                                disabled={(widget.height || 3) <= 2}
+                              >
+                                <HugeiconsIcon icon={ArrowUp01Icon} className="size-3" />
+                                <span>Shorter</span>
+                              </button>
+                              <span className="text-[10px] font-mono px-1 font-semibold text-foreground">
+                                {widget.height || 3}h
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleAdjustHeight(widget, 1)}
+                                className="flex-1 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1 text-foreground disabled:opacity-30"
+                                disabled={(widget.height || 3) >= 8}
+                              >
+                                <span>Taller</span>
+                                <HugeiconsIcon icon={ArrowDown01Icon} className="size-3" />
                               </button>
                             </div>
 
@@ -288,18 +410,18 @@ export function DashboardGrid({
                               <button
                                 type="button"
                                 onClick={() => handleShiftPosition(widget, 'left')}
-                                className="px-1.5 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1"
+                                className="px-1.5 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1 text-foreground"
                               >
                                 <HugeiconsIcon icon={ArrowLeft01Icon} className="size-3" />
-                                <span>Move Left</span>
+                                <span>Shift Left</span>
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleShiftPosition(widget, 'right')}
-                                className="px-1.5 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1"
+                                className="px-1.5 py-1 text-[10px] bg-muted/40 hover:bg-muted border border-border flex items-center justify-center gap-1 text-foreground"
                               >
+                                <span>Shift Right</span>
                                 <HugeiconsIcon icon={ArrowRight01Icon} className="size-3" />
-                                <span>Move Right</span>
                               </button>
                             </div>
                           </>
@@ -336,24 +458,112 @@ export function DashboardGrid({
                   <WidgetRenderer widget={widget} isLoading={isLoading} />
                 )}
 
-                {/* Bottom-right interactive corner resize handle in edit mode */}
+                {/* Right-edge draggable arrow resize handle in edit mode */}
                 {isEditMode && (
                   <div
-                    title="Drag corner to resize width"
-                    className="absolute right-0 bottom-0 size-4 cursor-se-resize flex items-end justify-end p-0.5 text-primary opacity-60 hover:opacity-100"
+                    title="Drag right edge to resize width (← / →)"
+                    className="absolute -right-1 top-0 bottom-0 w-2.5 cursor-ew-resize hover:bg-primary/20 active:bg-primary/40 transition-colors z-20 flex items-center justify-center group/edge"
                     onPointerDown={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
                       const startX = e.clientX;
+                      const initialWidth = widget.width || 6;
                       const target = e.target as HTMLElement;
                       target.setPointerCapture(e.pointerId);
 
                       const onMove = (ev: PointerEvent) => {
-                        const delta = ev.clientX - startX;
-                        handleCornerResize(widget, delta);
+                        const deltaPixels = ev.clientX - startX;
+                        const columnDelta = Math.round(deltaPixels / 60);
+                        const newWidth = Math.min(12, Math.max(3, initialWidth + columnDelta));
+                        if (newWidth !== widget.width) {
+                          const updated = widgets.map((w) => (w.id === widget.id ? { ...w, width: newWidth } : w));
+                          onUpdateLayout(updated);
+                        }
                       };
 
-                      const onUp = () => {
+                      const onUp = (ev: PointerEvent) => {
+                        try { target.releasePointerCapture(ev.pointerId); } catch {}
+                        window.removeEventListener('pointermove', onMove);
+                        window.removeEventListener('pointerup', onUp);
+                      };
+
+                      window.addEventListener('pointermove', onMove);
+                      window.addEventListener('pointerup', onUp);
+                    }}
+                  >
+                    <div className="w-0.5 h-8 bg-border group-hover/edge:bg-primary group-hover/edge:h-12 rounded transition-all" />
+                  </div>
+                )}
+
+                {/* Bottom-edge draggable arrow resize handle in edit mode */}
+                {isEditMode && (
+                  <div
+                    title="Drag bottom edge to resize height (↑ / ↓)"
+                    className="absolute left-0 right-0 -bottom-1 h-2.5 cursor-ns-resize hover:bg-primary/20 active:bg-primary/40 transition-colors z-20 flex items-center justify-center group/bottom"
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const startY = e.clientY;
+                      const initialHeight = widget.height || 3;
+                      const target = e.target as HTMLElement;
+                      target.setPointerCapture(e.pointerId);
+
+                      const onMove = (ev: PointerEvent) => {
+                        const deltaPixels = ev.clientY - startY;
+                        const rowDelta = Math.round(deltaPixels / 50);
+                        const newHeight = Math.min(8, Math.max(2, initialHeight + rowDelta));
+                        if (newHeight !== widget.height) {
+                          const updated = widgets.map((w) => (w.id === widget.id ? { ...w, height: newHeight } : w));
+                          onUpdateLayout(updated);
+                        }
+                      };
+
+                      const onUp = (ev: PointerEvent) => {
+                        try { target.releasePointerCapture(ev.pointerId); } catch {}
+                        window.removeEventListener('pointermove', onMove);
+                        window.removeEventListener('pointerup', onUp);
+                      };
+
+                      window.addEventListener('pointermove', onMove);
+                      window.addEventListener('pointerup', onUp);
+                    }}
+                  >
+                    <div className="h-0.5 w-12 bg-border group-hover/bottom:bg-primary group-hover/bottom:w-16 rounded transition-all" />
+                  </div>
+                )}
+
+                {/* Bottom-right interactive corner diagonal resize handle in edit mode */}
+                {isEditMode && (
+                  <div
+                    title="Drag corner to resize width and height (⤡)"
+                    className="absolute right-0 bottom-0 size-4 cursor-se-resize flex items-end justify-end p-0.5 text-primary opacity-60 hover:opacity-100 z-30"
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const startX = e.clientX;
+                      const startY = e.clientY;
+                      const initialWidth = widget.width || 6;
+                      const initialHeight = widget.height || 3;
+                      const target = e.target as HTMLElement;
+                      target.setPointerCapture(e.pointerId);
+
+                      const onMove = (ev: PointerEvent) => {
+                        const deltaX = ev.clientX - startX;
+                        const deltaY = ev.clientY - startY;
+                        const columnDelta = Math.round(deltaX / 60);
+                        const rowDelta = Math.round(deltaY / 50);
+                        const newWidth = Math.min(12, Math.max(3, initialWidth + columnDelta));
+                        const newHeight = Math.min(8, Math.max(2, initialHeight + rowDelta));
+                        if (newWidth !== widget.width || newHeight !== widget.height) {
+                          const updated = widgets.map((w) =>
+                            w.id === widget.id ? { ...w, width: newWidth, height: newHeight } : w
+                          );
+                          onUpdateLayout(updated);
+                        }
+                      };
+
+                      const onUp = (ev: PointerEvent) => {
+                        try { target.releasePointerCapture(ev.pointerId); } catch {}
                         window.removeEventListener('pointermove', onMove);
                         window.removeEventListener('pointerup', onUp);
                       };
