@@ -75,6 +75,8 @@ export function QueryPane({
   const [monitorId, setMonitorId] = useState(currentConfig.monitorId || '');
   const [timeRange, setTimeRange] = useState(currentConfig.timeRange || '24h');
   const [width, setWidth] = useState(currentItem?.width || 6);
+  const [rowSpan, setRowSpan] = useState(currentItem?.height || 3);
+  const [newRow, setNewRow] = useState(Boolean(currentConfig.newRow));
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -88,6 +90,8 @@ export function QueryPane({
       setMonitorId(conf.monitorId || '');
       setTimeRange(conf.timeRange || '24h');
       setWidth(currentItem.width || 6);
+      setRowSpan(currentItem.height || 3);
+      setNewRow(Boolean(conf.newRow));
     }
   }, [currentItem]);
 
@@ -101,6 +105,8 @@ export function QueryPane({
     monitorId: string;
     timeRange: string;
     width: number;
+    rowSpan: number;
+    newRow: boolean;
   }>) => {
     const nextMetric = updates.metric ?? metric;
     const nextViz = updates.visualizationType ?? visualizationType;
@@ -110,6 +116,8 @@ export function QueryPane({
     const nextMonId = updates.monitorId !== undefined ? updates.monitorId : monitorId;
     const nextTime = updates.timeRange ?? timeRange;
     const nextWidth = updates.width ?? width;
+    const nextRowSpan = updates.rowSpan !== undefined ? updates.rowSpan : rowSpan;
+    const nextNewRow = updates.newRow !== undefined ? updates.newRow : newRow;
 
     if (updates.metric !== undefined) setMetric(updates.metric);
     if (updates.visualizationType !== undefined) setVisualizationType(updates.visualizationType);
@@ -119,6 +127,8 @@ export function QueryPane({
     if (updates.monitorId !== undefined) setMonitorId(updates.monitorId);
     if (updates.timeRange !== undefined) setTimeRange(updates.timeRange);
     if (updates.width !== undefined) setWidth(updates.width);
+    if (updates.rowSpan !== undefined) setRowSpan(updates.rowSpan);
+    if (updates.newRow !== undefined) setNewRow(updates.newRow);
 
     onChangeDraft({
       title: nextTitle,
@@ -129,9 +139,10 @@ export function QueryPane({
         environmentId: nextEnvId || undefined,
         monitorId: nextMonId || undefined,
         timeRange: nextTime,
+        newRow: nextNewRow,
       },
       width: nextWidth,
-      height: 3,
+      height: nextRowSpan,
     });
   };
 
@@ -147,9 +158,10 @@ export function QueryPane({
           environmentId: environmentId || undefined,
           monitorId: monitorId || undefined,
           timeRange,
+          newRow,
         },
         width,
-        height: 3,
+        height: rowSpan,
       });
       onClose();
     } catch (err) {
@@ -352,6 +364,48 @@ export function QueryPane({
                   </button>
                 </div>
               </div>
+
+              {/* Row Span (Height) */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground text-[11px]">Row Span:</span>
+                <div className="flex items-center border border-input bg-input/20">
+                  <button
+                    type="button"
+                    title="Shrink height (↑ arrow)"
+                    onClick={() => handleFieldChange({ rowSpan: Math.max(2, rowSpan - 1) })}
+                    disabled={rowSpan <= 2}
+                    className="size-7 flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+                  >
+                    <HugeiconsIcon icon={ArrowUp01Icon} className="size-3.5" />
+                  </button>
+                  <span className="px-2 text-xs font-mono font-semibold text-foreground select-none">
+                    {rowSpan} rows
+                  </span>
+                  <button
+                    type="button"
+                    title="Expand height (↓ arrow)"
+                    onClick={() => handleFieldChange({ rowSpan: Math.min(8, rowSpan + 1) })}
+                    disabled={rowSpan >= 8}
+                    className="size-7 flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+                  >
+                    <HugeiconsIcon icon={ArrowDown01Icon} className="size-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Start on New Row */}
+              <button
+                type="button"
+                onClick={() => handleFieldChange({ newRow: !newRow })}
+                className={`h-7 px-2 border text-xs flex items-center gap-1 transition-colors ${
+                  newRow
+                    ? 'bg-primary/10 border-primary text-primary font-semibold'
+                    : 'bg-input/20 border-input text-muted-foreground hover:text-foreground'
+                }`}
+                title="Force panel to start on a new row"
+              >
+                <span>{newRow ? '✓ Starts on New Row' : 'Start on New Row'}</span>
+              </button>
 
               <div className="flex items-center gap-1.5">
                 <span className="text-muted-foreground text-[11px]">Time Window:</span>
