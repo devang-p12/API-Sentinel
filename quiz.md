@@ -579,6 +579,77 @@ Understand distributed queueing with BullMQ, decoupling workers from domain and 
 
 ---
 
+## QUIZ-010 — Real Metrics & Dashboard Data Layer (Phase 3)
+
+**Feature:**
+Phase 3: Real Metrics Layer, Metric Query Service, Data Source Abstraction, and Dynamic Bucketing
+
+**Date:**
+2026-10-26
+
+**Status:**
+Stored for Learning & Architecture Review (No Quiz Gate)
+
+**Purpose:**
+Understand metric calculation isolation, backend data aggregation, percentile algorithms, dynamic time bucketing, empty-state accuracy, data source decoupling, and why Prometheus is deferred.
+
+### Architecture:
+
+1. **Why should the frontend NOT calculate metrics?**
+   - *Network & Compute Efficiency*: Millions of raw `MonitorExecution` rows would have to be serialized over JSON, saturating bandwidth and exhausting client memory.
+   - *Single Source of Truth*: SLA availability, latency bounds, and error rates must be calculated consistently across browsers, mobile views, export jobs, and alerting evaluators.
+   - *Security*: Exposing raw database rows or SQL queries to the browser risks multi-tenant data leaks.
+
+2. **Why do we need `MetricQueryService`?**
+   - It acts as the centralized domain brain for metric evaluation. It validates metric names against `METRIC_REGISTRY`, validates and clamps time ranges (preventing runaway queries > 365 days), resolves multi-tenant security filters (Organization -> Project -> API -> Environment -> Monitor), executes percentile statistics, and performs time-series dynamic bucketing.
+
+3. **Why separate `MetricDataSource` from `MetricQueryService`?**
+   - The Dependency Inversion Principle. `MetricQueryService` focuses strictly on metric semantics, statistical math, and visualization formatting. `MetricDataSource` handles raw data fetching from the storage engine. This prevents `MetricQueryService` from being tightly coupled to Prisma or PostgreSQL.
+
+4. **Why start with PostgreSQL as the initial data source?**
+   - PostgreSQL is already deployed, ACID-compliant, and storing every `MonitorExecution` record with high-performance indexes `@@index([monitorId, executedAt(sort: Desc)])`. It provides immediate historical observability without the operational overhead of running, scraping, and maintaining an external time-series database for Phase 3.
+
+### Metrics:
+
+5. **How is success rate calculated?**
+   - `success_rate = (successful executions / total executions) * 100`, where an execution is successful if and only if `status === 'SUCCESS'`. If total executions is 0, the metric returns `null` (never `NaN` or `Infinity`), cleanly signaling "No Data".
+
+6. **How is error rate calculated?**
+   - `error_rate = (failed executions / total executions) * 100`, where failures account for all failure modes (`HTTP_ERROR`, `TIMEOUT`, `NETWORK_ERROR`, `SCHEMA_ERROR`, `UNKNOWN_ERROR`), rather than only checking `statusCode >= 400`.
+
+7. **What are P95 and P99 latency percentiles, and how are they calculated?**
+   - **P95 Latency**: 95% of monitored requests completed in this duration or faster; only 5% of requests were slower.
+   - **P99 Latency**: 99% of requests completed in this duration or faster; captures extreme tail latency.
+   - **Algorithm**: Calculated deterministically using the nearest-rank method on sorted arrays of valid response times:
+     ```typescript
+     index = Math.ceil((p / 100) * sorted.length) - 1;
+     return sorted[Math.max(0, Math.min(index, sorted.length - 1))];
+     ```
+
+8. **Why shouldn't empty latency buckets be represented as 0ms?**
+   - Representing no executions as `0ms` indicates an instantaneous, zero-millisecond HTTP response. This corrupts min and average latency graphs and misleads engineers into thinking requests succeeded instantaneously when in reality no probes were run. Empty latency buckets must return `null`.
+
+### Performance:
+
+9. **Why bucket time-series data instead of returning every execution?**
+   - A single monitor running every minute produces 1,440 executions per day (or 43,200 per month). Multiplying this across 20 monitors yields nearly 1,000,000 records. Chart libraries (Recharts / SVG / Canvas) crash or stutter when attempting to render hundreds of thousands of SVG nodes. Bucketing aggregates raw rows into ~60 compact points (e.g. 15-minute buckets for 24h), reducing payload sizes by over 98% while preserving trend fidelity.
+
+10. **Why shouldn't the dashboard load every raw execution?**
+    - The dashboard's role is high-level situational awareness (SLA, percentiles, trend lines). Raw executions are only needed for post-incident root-cause investigation (available in the Monitor Execution History table).
+
+11. **When would caching become useful?**
+    - When multiple users or wall-mounted dashboard screens query identical historical windows (e.g., "Last 7 days" or closed hourly buckets). Caching historical buckets in Redis eliminates redundant database scans. For Phase 3, PostgreSQL indexes provide single-digit millisecond queries, keeping architecture simple until profiling proves cache necessity.
+
+### Architecture Evolution:
+
+12. **Why isn't Prometheus required yet?**
+    - Prometheus adds operational overhead (scrape targets, node exporters, Alertmanager, PromQL maintenance). Synthetic health checks generate low-to-medium write throughput that PostgreSQL handles with ease. Proving the data pipeline end-to-end first with zero extra dependencies ensures platform stability.
+
+13. **How can Prometheus be added later without rewriting the dashboard?**
+    - Because of the `MetricDataSource` interface! Later, a `PrometheusMetricDataSource` can be implemented to query PromQL APIs. `MetricQueryService` can route queries to Prometheus or PostgreSQL interchangeably. The controller, dashboard API, frontend widgets, and UI layout require zero code changes.
+
+---
+
 ## Historical Architecture Quizzes Archive
 
 ### Phase 1 & 2: Backend Architecture & Reliability Intelligence Archive

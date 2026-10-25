@@ -364,13 +364,40 @@ export const api = {
   getDashboards: (projectId?: string) =>
     fetchJson<Dashboard[]>(`/dashboards${projectId ? `?projectId=${projectId}` : ''}`),
   getDashboard: (id: string) => fetchJson<Dashboard>(`/dashboards/${id}`),
-  getDashboardData: (id: string, timeRange?: string, from?: string, to?: string) => {
+  getDashboardData: (
+    id: string,
+    timeRange?: string,
+    from?: string,
+    to?: string,
+    apiId?: string,
+    environmentId?: string,
+    monitorId?: string,
+  ) => {
     const params = new URLSearchParams();
     if (timeRange) params.set('timeRange', timeRange);
     if (from) params.set('from', from);
     if (to) params.set('to', to);
+    if (apiId) params.set('apiId', apiId);
+    if (environmentId) params.set('environmentId', environmentId);
+    if (monitorId) params.set('monitorId', monitorId);
     return fetchJson<DashboardDataResponse>(`/dashboards/${id}/data?${params.toString()}`);
   },
+  queryMetric: (data: {
+    metric: string;
+    filters?: { projectId?: string; apiId?: string; environmentId?: string; monitorId?: string };
+    apiId?: string;
+    environmentId?: string;
+    monitorId?: string;
+    projectId?: string;
+    timeRange?: string;
+    from?: string;
+    to?: string;
+    groupBy?: string;
+  }) =>
+    fetchJson<MetricQueryResult>('/dashboards/metrics/query', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   createDashboard: (data: { name: string; description?: string; projectId?: string }) =>
     fetchJson<Dashboard>('/dashboards', {
       method: 'POST',

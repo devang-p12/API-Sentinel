@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -26,7 +28,14 @@ export class DashboardsController {
   }
 
   @Post('preview')
+  @HttpCode(HttpStatus.OK)
   previewQuery(@Body() dto: PreviewQueryDto) {
+    return this.dashboardsService.previewQuery(dto);
+  }
+
+  @Post('metrics/query')
+  @HttpCode(HttpStatus.OK)
+  queryMetric(@Body() dto: PreviewQueryDto) {
     return this.dashboardsService.previewQuery(dto);
   }
 
@@ -61,8 +70,20 @@ export class DashboardsController {
     @Query('timeRange') timeRange?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('apiId') apiId?: string,
+    @Query('environmentId') environmentId?: string,
+    @Query('monitorId') monitorId?: string,
   ) {
-    return this.dashboardsService.getDashboardData(id, timeRange, from, to);
+    return this.dashboardsService.getDashboardData(
+      id,
+      timeRange,
+      from,
+      to,
+      undefined,
+      apiId,
+      environmentId,
+      monitorId,
+    );
   }
 
   @Patch(':id/layout')

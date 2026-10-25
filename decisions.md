@@ -714,6 +714,98 @@ Implement a decoupled, reliable backend monitoring engine for Sentinel adhering 
 **Date:**
 2026-10-26
 
+---
+
+## ADR-023: Real Metrics Calculation & Dashboard Data Layer (Phase 3)
+
+### Decision:
+Implement a centralized backend metric aggregation pipeline (`MetricQueryService` + `MetricDataSource` interface + `MetricRegistry`) for Sentinel. All metric calculations (availability, success/error rates, latency percentiles, request counts, and time-series bucketing) are performed strictly on the backend. The frontend dashboard components (`Stat`, `TimeSeries`, `BarChart`, `Gauge`, `Table`) consume normalized metric results over HTTP and never query raw executions or perform math on the client.
+
+### Architectural Context & Pipeline:
+```text
+MonitorExecution (PostgreSQL)
+       ↓
+MetricDataSource (PostgresMetricDataSource)
+       ↓
+MetricQueryService (validation, scoping, percentile math, dynamic bucketing)
+       ↓
+MetricRegistry (catalog & visualization constraints)
+       ↓
+DashboardsController (POST /metrics/query, GET /dashboards/:id/data)
+       ↓
+DashboardWidget (Stat, TimeSeries, Bar, Gauge, Table)
+```
+
+### Detailed Rationale & Architectural Decisions:
+
+1. **Why metrics are calculated on the backend (and why frontend never calculates metrics or runs SQL):**
+   - **Data Volume & Network Efficiency**: A busy monitoring service generates millions of `MonitorExecution` records. Sending raw execution logs to a browser would overwhelm client memory, cause multi-second network transfers, and freeze the browser tab. The backend aggregates thousands of rows into a single scalar value or ~60 time-series points.
+   - **Single Source of Truth**: Availability, SLA compliance, and percentiles must be calculated identically across dashboards, public status pages, incident triggers, and exported reports. Frontend calculations inevitably lead to discrepancies across different devices, time zones, or browsers.
+   - **Zero SQL in Frontend**: Exposing SQL or raw database tables to the frontend violates security boundaries and leaks multi-tenant data structures.
+
+2. **Why `MetricQueryService` exists:**
+   - Centralizes validation (metric existence, time range bounds, date sanity, tenant scoping).
+   - Encapsulates statistical algorithms (P50/P90/P95/P99 latency calculations, bucketing).
+   - Keeps HTTP controllers thin and decouples presentation formats from query mechanics.
+
+3. **Why `MetricDataSource` abstraction exists (and why PostgreSQL is first, Prometheus deferred):**
+   - **Abstraction**: `MetricDataSource` defines an interface (`getExecutions({ monitorIds, from, to })`) that decouples `MetricQueryService` from Prisma and PostgreSQL.
+   - **PostgreSQL First**: PostgreSQL already stores every `MonitorExecution` with composite indexes (`[monitorId, executedAt(sort: Desc)]`). It provides immediate, zero-infrastructure observability for Phase 3 without introducing additional services.
+   - **Prometheus Deferred**: Prometheus, Grafana, Loki, and OpenTelemetry introduce operational complexity (scraping daemons, TSDB storage, PromQL integration). Deferring Prometheus to a later phase proves that synthetic monitoring data flows reliably end-to-end first. When Prometheus is added later, it will plug into `MetricDataSource` as `PrometheusMetricDataSource` without requiring any changes to the dashboard or frontend visualization components.
+
+4. **How Availability and Reliability Metrics are Defined:**
+   - **Availability**: `(successful executions / total executions) * 100`. An execution is successful if and only if `status === 'SUCCESS'` (HTTP status matched expectation, probe did not time out, socket did not error, and payload contract was valid).
+   - **Success Rate**: Identical to Availability for synthetic probes: `(successCount / totalCount) * 100`.
+   - **Error Rate**: `(failedCount / totalCount) * 100`, where failures include `HTTP_ERROR`, `TIMEOUT`, `NETWORK_ERROR`, and `SCHEMA_ERROR`.
+   - **Failure Count**: Total count of executions where `status !== 'SUCCESS'`.
+   - **Timeout Count**: Strictly executions where canonical status is `TIMEOUT`. Does not infer timeout from duration.
+   - **Zero-Division Safety**: When total executions equal 0, rates return `null` (not `NaN` or `Infinity`), enabling UI to cleanly display "No Data".
+
+5. **How Latency Percentiles (P50, P95, P99) are Calculated:**
+   - **Deterministic Percentile Algorithm**: Uses the nearest-rank method on sorted arrays of valid response durations (`responseTimeMs !== null`).
+     ```typescript
+     index = Math.ceil((p / 100) * sorted.length) - 1;
+     return sorted[Math.max(0, Math.min(index, sorted.length - 1))];
+     ```
+   - **Null-Safety**: Executions without valid duration (e.g., aborted socket before handshake or timeout) are excluded from latency calculations. If no valid latencies exist, percentiles return `null`.
+
+6. **How Time Bucketing and Series are Generated:**
+   - Instead of returning raw records, the requested time range (`to - from`) is divided into intelligent bucket windows:
+     - Range <= 1 hour: 1-minute buckets
+     - Range <= 6 hours: 5-minute buckets
+     - Range <= 24 hours: 15-minute buckets
+     - Range <= 7 days: 1-hour buckets
+     - Range <= 30 days: 6-hour buckets
+     - Range > 30 days: 24-hour (daily) buckets
+   - Each bucket independently calculates aggregate statistics for executions falling within that window.
+   - Empty bucket representation:
+     - For **request counts**, empty buckets are `0`.
+     - For **latency metrics (avg, p50, p95, min, max)**, empty buckets are `null`. Latency must **never** be coerced to `0ms` because 0ms implies an impossibly fast execution rather than the absence of checks.
+     - For **rates**, empty buckets are `null`.
+
+7. **Filter Composability and Override Precedence:**
+   - Dashboard filters support hierarchical scopes: `organizationId` -> `projectId` -> `apiId` -> `environmentId` -> `monitorId`.
+   - Precedence: **Widget-Specific Configuration > Dashboard Global Filter > Default Scope**.
+   - If a widget defines `environmentId: "staging-id"`, it retains that environment filter even if the dashboard header selects "Production". If the widget leaves `environmentId` unset, it inherits the dashboard global filter.
+
+8. **Time Range Validation:**
+   - Rejects queries where `from > to` with `BadRequestException (400)`.
+   - Rejects queries where `to - from > 365 days` to protect database query planners from accidental runaway full-table scans.
+   - All internal storage and calculation timestamps use UTC ISO-8601 strings.
+
+### Alternatives Considered:
+- *Direct Prisma queries in controller*: Rejected. Violates NestJS separation of concerns and prevents future pluggable data sources.
+- *Client-side aggregation of raw execution list*: Rejected. Causes network bloat and UI freezing when monitor executions exceed thousands of rows.
+- *Defaulting empty latency to 0ms*: Rejected. Severely distorts min/average latency and mislead users into thinking requests completed in 0 milliseconds.
+
+### Consequences:
+- The dashboard is fast, robust, and displays real synthetic probe data.
+- Widgets handle loading, empty, and error states gracefully without crashing.
+- Future transition to Prometheus or hybrid storage requires zero frontend changes.
+
+**Date:**
+2026-10-26
+
 
 
 

@@ -1,4 +1,4 @@
-export type MetricCategory = 'reliability' | 'performance' | 'traffic' | 'errors';
+export type MetricCategory = 'reliability' | 'performance' | 'traffic';
 export type VisualizationType = 'stat' | 'time_series' | 'bar' | 'table' | 'gauge';
 
 export interface MetricDefinition {
@@ -12,6 +12,7 @@ export interface MetricDefinition {
 }
 
 export const METRIC_REGISTRY: Record<string, MetricDefinition> = {
+  // --- Reliability Category ---
   availability: {
     id: 'availability',
     name: 'Availability (Uptime SLA)',
@@ -39,6 +40,35 @@ export const METRIC_REGISTRY: Record<string, MetricDefinition> = {
     supportedVisualizations: ['time_series', 'stat', 'gauge', 'table'],
     defaultVisualization: 'time_series',
   },
+  failure_count: {
+    id: 'failure_count',
+    name: 'Failure Count',
+    description: 'Count of executions failing assertions or encountering HTTP/network errors',
+    category: 'reliability',
+    unit: 'fails',
+    supportedVisualizations: ['stat', 'bar', 'time_series', 'table'],
+    defaultVisualization: 'stat',
+  },
+  timeout_count: {
+    id: 'timeout_count',
+    name: 'Timeout Count',
+    description: 'Count of executions aborted due to timeout expiration',
+    category: 'reliability',
+    unit: 'timeouts',
+    supportedVisualizations: ['stat', 'bar', 'time_series', 'table'],
+    defaultVisualization: 'stat',
+  },
+  http_status_distribution: {
+    id: 'http_status_distribution',
+    name: 'HTTP Status Code Distribution',
+    description: 'Breakdown of status codes (200, 500, TIMEOUT, ERROR)',
+    category: 'reliability',
+    unit: 'distribution',
+    supportedVisualizations: ['bar', 'table', 'stat'],
+    defaultVisualization: 'bar',
+  },
+
+  // --- Performance Category ---
   average_latency: {
     id: 'average_latency',
     name: 'Average Response Time',
@@ -102,6 +132,8 @@ export const METRIC_REGISTRY: Record<string, MetricDefinition> = {
     supportedVisualizations: ['stat', 'gauge', 'time_series', 'table'],
     defaultVisualization: 'stat',
   },
+
+  // --- Traffic Category ---
   request_count: {
     id: 'request_count',
     name: 'Request / Check Count',
@@ -119,33 +151,6 @@ export const METRIC_REGISTRY: Record<string, MetricDefinition> = {
     unit: 'bytes',
     supportedVisualizations: ['stat', 'gauge', 'time_series', 'table'],
     defaultVisualization: 'stat',
-  },
-  failure_count: {
-    id: 'failure_count',
-    name: 'Failure Count (5xx / Unexpected)',
-    description: 'Count of completed executions returning unexpected status codes',
-    category: 'errors',
-    unit: 'fails',
-    supportedVisualizations: ['stat', 'bar', 'time_series', 'table'],
-    defaultVisualization: 'stat',
-  },
-  timeout_count: {
-    id: 'timeout_count',
-    name: 'Timeout Count',
-    description: 'Count of executions aborted due to timeout expiration',
-    category: 'errors',
-    unit: 'timeouts',
-    supportedVisualizations: ['stat', 'bar', 'time_series', 'table'],
-    defaultVisualization: 'stat',
-  },
-  http_status_distribution: {
-    id: 'http_status_distribution',
-    name: 'HTTP Status Code Distribution',
-    description: 'Breakdown of status codes (200, 500, TIMEOUT, ERROR)',
-    category: 'errors',
-    unit: 'distribution',
-    supportedVisualizations: ['bar', 'table', 'stat'],
-    defaultVisualization: 'bar',
   },
 };
 

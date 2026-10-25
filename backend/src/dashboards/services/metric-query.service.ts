@@ -1,8 +1,20 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { getMetricDefinition, MetricDefinition } from '../metric-registry';
+import {
+  METRIC_DATA_SOURCE,
+  MetricDataRecord,
+  MetricDataSource,
+} from '../data-sources/metric-data-source.interface';
+import { PostgresMetricDataSource } from '../data-sources/postgres-metric-data-source.service';
 
 export interface MetricQueryFilters {
+  organizationId?: string;
   projectId?: string;
   apiId?: string;
   environmentId?: string;
@@ -12,14 +24,21 @@ export interface MetricQueryFilters {
 export interface MetricQueryOptions {
   metric: string;
   filters?: MetricQueryFilters;
-  from?: Date;
-  to?: Date;
+  apiId?: string;
+  environmentId?: string;
+  monitorId?: string;
+  projectId?: string;
+  organizationId?: string;
+  from?: Date | string;
+  to?: Date | string;
+  aggregation?: string;
+  groupBy?: string;
   bucketMinutes?: number;
 }
 
 export interface TimeSeriesPoint {
   timestamp: string;
-  value: number;
+  value: number | null;
   label?: string;
 }
 
@@ -39,11 +58,11 @@ export interface MetricQueryResult {
   };
   summary: {
     current: number | null;
-    min?: number;
-    max?: number;
-    avg?: number;
-    total?: number;
-    label?: string;
+    min: number | null;
+    max: number | null;
+    avg: number | null;
+    total: number;
+    label: string;
   };
   timeSeries: TimeSeriesPoint[];
   distribution?: DistributionItem[];
@@ -51,28 +70,66 @@ export interface MetricQueryResult {
     columns: string[];
     rows: Array<Record<string, any>>;
   };
+  value?: number | null;
+  type?: 'scalar' | 'timeseries';
+  series?: TimeSeriesPoint[];
+  from?: string;
+  to?: string;
 }
 
 @Injectable()
 export class MetricQueryService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly dataSource: MetricDataSource;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(METRIC_DATA_SOURCE) dataSource?: MetricDataSource,
+  ) {
+    this.dataSource = dataSource || new PostgresMetricDataSource(this.prisma);
+  }
 
   /**
    * Main metric query resolver.
    * Isolates dashboard widgets from direct database execution queries.
-   * Future Prometheus integration plugs into this interface.
+   * Future Prometheus integration plugs into this interface via MetricDataSource.
    */
   async query(options: MetricQueryOptions): Promise<MetricQueryResult> {
+    // 1. Validate Metric
     const metricDef = getMetricDefinition(options.metric);
     if (!metricDef) {
-      throw new NotFoundException(`Unknown metric: ${options.metric}`);
+      throw new BadRequestException(`Unknown metric: ${options.metric}`);
     }
 
-    const to = options.to || new Date();
-    const from = options.from || new Date(to.getTime() - 24 * 60 * 60 * 1000); // default last 24h
+    // 2. Resolve and Validate Time Window
+    const to = options.to ? new Date(options.to) : new Date();
+    const from = options.from
+      ? new Date(options.from)
+      : new Date(to.getTime() - 24 * 60 * 60 * 1000); // default last 24h
 
-    // 1. Resolve Target Monitors based on scoped filters
-    const targetMonitors = await this.resolveTargetMonitors(options.filters);
+    if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+      throw new BadRequestException('Invalid date format for "from" or "to"');
+    }
+
+    if (from.getTime() > to.getTime()) {
+      throw new BadRequestException('Invalid time range: "from" must be before "to"');
+    }
+
+    const maxRangeMs = 365 * 24 * 60 * 60 * 1000;
+    if (to.getTime() - from.getTime() > maxRangeMs) {
+      throw new BadRequestException('Requested time range exceeds maximum limit of 365 days');
+    }
+
+    // 3. Compose filters (merging nested filters and flat options)
+    const filters: MetricQueryFilters = {
+      projectId: options.filters?.projectId || options.projectId,
+      apiId: options.filters?.apiId || options.apiId,
+      environmentId: options.filters?.environmentId || options.environmentId,
+      monitorId: options.filters?.monitorId || options.monitorId,
+      organizationId: options.filters?.organizationId || options.organizationId,
+    };
+
+    // 4. Resolve Target Monitors based on scoped filters and authorization
+    const targetMonitors = await this.resolveTargetMonitors(filters);
     const monitorIds = targetMonitors.map((m) => m.id);
 
     // If no monitors matched the filter criteria, return clean empty result
@@ -80,23 +137,18 @@ export class MetricQueryService {
       return this.buildEmptyResult(metricDef, from, to);
     }
 
-    // 2. Query executions across the target monitors in the time window
-    const executions = await this.prisma.monitorExecution.findMany({
-      where: {
-        monitorId: { in: monitorIds },
-        executedAt: {
-          gte: from,
-          lte: to,
-        },
-      },
-      orderBy: { executedAt: 'asc' },
+    // 5. Query executions across the target monitors via Data Source Abstraction
+    const executions = await this.dataSource.getExecutions({
+      monitorIds,
+      from,
+      to,
     });
 
     if (executions.length === 0) {
-      return this.buildEmptyResult(metricDef, from, to);
+      return this.buildEmptyResult(metricDef, from, to, true);
     }
 
-    // 3. Compute aggregate statistics
+    // 6. Compute aggregate statistics
     let successCount = 0;
     let failedCount = 0;
     let timeoutCount = 0;
@@ -110,8 +162,10 @@ export class MetricQueryService {
         successCount++;
       } else if (exec.status === 'TIMEOUT') {
         timeoutCount++;
+        failedCount++;
       } else if (exec.status === 'ERROR') {
         errorCount++;
+        failedCount++;
       } else {
         failedCount++;
       }
@@ -139,22 +193,22 @@ export class MetricQueryService {
     latencies.sort((a, b) => a - b);
     const totalExecutions = executions.length;
 
-    // Latency Percentiles
+    // Latency calculations (null if no valid latencies)
     const p50 = this.calculatePercentile(latencies, 50);
     const p90 = this.calculatePercentile(latencies, 90);
     const p95 = this.calculatePercentile(latencies, 95);
     const p99 = this.calculatePercentile(latencies, 99);
-    const minLatency = latencies.length > 0 ? latencies[0] : 0;
-    const maxLatency = latencies.length > 0 ? latencies[latencies.length - 1] : 0;
+    const minLatency = latencies.length > 0 ? latencies[0] : null;
+    const maxLatency = latencies.length > 0 ? latencies[latencies.length - 1] : null;
     const sumLatency = latencies.reduce((sum, v) => sum + v, 0);
-    const avgLatency = latencies.length > 0 ? Math.round(sumLatency / latencies.length) : 0;
+    const avgLatency = latencies.length > 0 ? Math.round(sumLatency / latencies.length) : null;
 
-    // Reliability Calculations
+    // Reliability calculations
     const availabilityPct = Number(((successCount / totalExecutions) * 100).toFixed(2));
     const successRatePct = availabilityPct;
-    const errorRatePct = Number((((failedCount + timeoutCount + errorCount) / totalExecutions) * 100).toFixed(2));
+    const errorRatePct = Number(((failedCount / totalExecutions) * 100).toFixed(2));
 
-    const avgSize = sizes.length > 0 ? Math.round(sizes.reduce((a, b) => a + b, 0) / sizes.length) : 0;
+    const avgSize = sizes.length > 0 ? Math.round(sizes.reduce((a, b) => a + b, 0) / sizes.length) : null;
 
     // Determine current value for requested metric
     let currentValue: number | null = null;
@@ -208,18 +262,31 @@ export class MetricQueryService {
         currentValue = avgLatency;
     }
 
-    // 4. Time Series Generation with Dynamic Bucketization
+    // 7. Time Series Generation with Intelligent Dynamic Bucketization
     const bucketDurationMs = this.resolveBucketDurationMs(from, to, options.bucketMinutes);
-    const bucketMap = new Map<number, { total: number; success: number; failed: number; latencies: number[]; sizeSum: number }>();
+    const bucketMap = new Map<
+      number,
+      { total: number; success: number; failed: number; timeouts: number; latencies: number[]; sizeSum: number }
+    >();
 
     for (const exec of executions) {
       const bTime = Math.floor(exec.executedAt.getTime() / bucketDurationMs) * bucketDurationMs;
-      const b = bucketMap.get(bTime) || { total: 0, success: 0, failed: 0, latencies: [], sizeSum: 0 };
+      const b = bucketMap.get(bTime) || {
+        total: 0,
+        success: 0,
+        failed: 0,
+        timeouts: 0,
+        latencies: [],
+        sizeSum: 0,
+      };
       b.total++;
       if (exec.status === 'SUCCESS') {
         b.success++;
       } else {
         b.failed++;
+        if (exec.status === 'TIMEOUT') {
+          b.timeouts++;
+        }
       }
       if (exec.responseTimeMs !== null && exec.responseTimeMs !== undefined) {
         b.latencies.push(exec.responseTimeMs);
@@ -235,19 +302,19 @@ export class MetricQueryService {
 
     for (const bTime of sortedBucketTimes) {
       const b = bucketMap.get(bTime)!;
-      let val = 0;
+      let val: number | null = null;
       b.latencies.sort((a, b) => a - b);
 
       switch (metricDef.id) {
         case 'availability':
         case 'success_rate':
-          val = Number(((b.success / b.total) * 100).toFixed(2));
+          val = b.total > 0 ? Number(((b.success / b.total) * 100).toFixed(2)) : null;
           break;
         case 'error_rate':
-          val = Number(((b.failed / b.total) * 100).toFixed(2));
+          val = b.total > 0 ? Number(((b.failed / b.total) * 100).toFixed(2)) : null;
           break;
         case 'average_latency':
-          val = b.latencies.length > 0 ? Math.round(b.latencies.reduce((x, y) => x + y, 0) / b.latencies.length) : 0;
+          val = b.latencies.length > 0 ? Math.round(b.latencies.reduce((x, y) => x + y, 0) / b.latencies.length) : null;
           break;
         case 'p50_latency':
           val = this.calculatePercentile(b.latencies, 50);
@@ -262,23 +329,25 @@ export class MetricQueryService {
           val = this.calculatePercentile(b.latencies, 99);
           break;
         case 'min_latency':
-          val = b.latencies.length > 0 ? b.latencies[0] : 0;
+          val = b.latencies.length > 0 ? b.latencies[0] : null;
           break;
         case 'max_latency':
-          val = b.latencies.length > 0 ? b.latencies[b.latencies.length - 1] : 0;
+          val = b.latencies.length > 0 ? b.latencies[b.latencies.length - 1] : null;
           break;
         case 'request_count':
           val = b.total;
           break;
         case 'failure_count':
-        case 'timeout_count':
           val = b.failed;
           break;
+        case 'timeout_count':
+          val = b.timeouts;
+          break;
         case 'response_size':
-          val = b.total > 0 ? Math.round(b.sizeSum / b.total) : 0;
+          val = b.total > 0 ? Math.round(b.sizeSum / b.total) : null;
           break;
         default:
-          val = b.latencies.length > 0 ? Math.round(b.latencies.reduce((x, y) => x + y, 0) / b.latencies.length) : 0;
+          val = b.latencies.length > 0 ? Math.round(b.latencies.reduce((x, y) => x + y, 0) / b.latencies.length) : null;
       }
 
       timeSeries.push({
@@ -287,7 +356,7 @@ export class MetricQueryService {
       });
     }
 
-    // 5. Distribution Generation (for bar/pie charts)
+    // 8. Distribution Generation (for bar/pie charts)
     const distribution: DistributionItem[] = Object.entries(statusCounts)
       .map(([cat, count]) => ({
         category: cat,
@@ -296,7 +365,7 @@ export class MetricQueryService {
       }))
       .sort((a, b) => b.count - a.count);
 
-    // 6. Tabular breakdown by Monitor
+    // 9. Tabular breakdown by Monitor
     const monitorExecsMap = new Map<string, { total: number; success: number; latencies: number[] }>();
     for (const exec of executions) {
       const item = monitorExecsMap.get(exec.monitorId) || { total: 0, success: 0, latencies: [] };
@@ -312,7 +381,10 @@ export class MetricQueryService {
         const stats = monitorExecsMap.get(m.id)!;
         stats.latencies.sort((a, b) => a - b);
         const monP95 = this.calculatePercentile(stats.latencies, 95);
-        const monAvg = stats.latencies.length > 0 ? Math.round(stats.latencies.reduce((a, b) => a + b, 0) / stats.latencies.length) : 0;
+        const monAvg =
+          stats.latencies.length > 0
+            ? Math.round(stats.latencies.reduce((a, b) => a + b, 0) / stats.latencies.length)
+            : null;
         const monAvail = Number(((stats.success / stats.total) * 100).toFixed(2));
         return {
           monitorId: m.id,
@@ -320,16 +392,26 @@ export class MetricQueryService {
           url: m.url,
           totalChecks: stats.total,
           availability: `${monAvail}%`,
-          avgLatency: `${monAvg}ms`,
-          p95Latency: `${monP95}ms`,
+          avgLatency: monAvg !== null ? `${monAvg}ms` : '—',
+          p95Latency: monP95 !== null ? `${monP95}ms` : '—',
           status: monAvail >= 99 ? 'HEALTHY' : monAvail >= 90 ? 'DEGRADED' : 'CRITICAL',
         };
       });
+
+    const formattedLabel =
+      currentValue !== null
+        ? `${currentValue}${metricDef.unit === '%' ? '%' : metricDef.unit === 'ms' ? ' ms' : ''}`
+        : 'No Data';
 
     return {
       metric: metricDef.id,
       metricName: metricDef.name,
       unit: metricDef.unit,
+      value: currentValue,
+      type: options.groupBy === 'time' ? 'timeseries' : 'scalar',
+      series: timeSeries,
+      from: from.toISOString(),
+      to: to.toISOString(),
       timeRange: {
         from: from.toISOString(),
         to: to.toISOString(),
@@ -340,7 +422,7 @@ export class MetricQueryService {
         max: maxLatency,
         avg: avgLatency,
         total: totalExecutions,
-        label: `${currentValue}${metricDef.unit === '%' ? '%' : metricDef.unit === 'ms' ? ' ms' : ''}`,
+        label: formattedLabel,
       },
       timeSeries,
       distribution,
@@ -352,48 +434,59 @@ export class MetricQueryService {
   }
 
   /**
-   * Resolves target monitors based on filter scope (Monitor, Environment, API, or Project).
+   * Resolves target monitors based on filter scope (Monitor, Environment, API, or Project)
+   * while strictly enforcing tenant / organization boundaries.
    */
   private async resolveTargetMonitors(filters?: MetricQueryFilters) {
-    if (filters?.monitorId) {
-      const mon = await this.prisma.monitor.findUnique({
-        where: { id: filters.monitorId },
-      });
-      return mon ? [mon] : [];
-    }
+    const where: any = {};
 
-    if (filters?.environmentId) {
-      return this.prisma.monitor.findMany({
-        where: { environmentId: filters.environmentId },
-      });
-    }
-
-    if (filters?.apiId) {
-      return this.prisma.monitor.findMany({
-        where: {
-          environment: {
-            apiId: filters.apiId,
+    if (filters?.organizationId) {
+      where.environment = {
+        api: {
+          project: {
+            organizationId: filters.organizationId,
           },
         },
-      });
+      };
     }
 
     if (filters?.projectId) {
-      return this.prisma.monitor.findMany({
-        where: {
-          environment: {
-            api: {
-              projectId: filters.projectId,
-            },
-          },
+      where.environment = {
+        ...(where.environment || {}),
+        api: {
+          ...(where.environment?.api || {}),
+          projectId: filters.projectId,
         },
-      });
+      };
     }
 
-    // Default: all monitors in database
-    return this.prisma.monitor.findMany();
+    if (filters?.apiId) {
+      where.environment = {
+        ...(where.environment || {}),
+        apiId: filters.apiId,
+      };
+    }
+
+    if (filters?.environmentId) {
+      where.environmentId = filters.environmentId;
+    }
+
+    if (filters?.monitorId) {
+      where.id = filters.monitorId;
+    }
+
+    return this.prisma.monitor.findMany({ where });
   }
 
+  /**
+   * Intelligently derives time-bucket durations from the requested time window:
+   * - Range <= 1h: 1-minute buckets (60 points)
+   * - Range <= 6h: 5-minute buckets (72 points)
+   * - Range <= 24h: 15-minute buckets (96 points)
+   * - Range <= 7d: 1-hour buckets (168 points)
+   * - Range <= 30d: 6-hour buckets (120 points)
+   * - Range > 30d: 24-hour buckets
+   */
   private resolveBucketDurationMs(from: Date, to: Date, explicitBucketMinutes?: number): number {
     if (explicitBucketMinutes && explicitBucketMinutes > 0) {
       return explicitBucketMinutes * 60 * 1000;
@@ -403,6 +496,7 @@ export class MetricQueryService {
     const sixHours = 6 * oneHour;
     const oneDay = 24 * oneHour;
     const sevenDays = 7 * oneDay;
+    const thirtyDays = 30 * oneDay;
 
     if (diffMs <= oneHour) {
       return 1 * 60 * 1000; // 1-minute buckets
@@ -411,36 +505,59 @@ export class MetricQueryService {
       return 5 * 60 * 1000; // 5-minute buckets
     }
     if (diffMs <= oneDay) {
-      return 30 * 60 * 1000; // 30-minute buckets
+      return 15 * 60 * 1000; // 15-minute buckets
     }
     if (diffMs <= sevenDays) {
-      return 3 * oneHour; // 3-hour buckets
+      return 1 * oneHour; // 1-hour buckets
+    }
+    if (diffMs <= thirtyDays) {
+      return 6 * oneHour; // 6-hour buckets
     }
     return oneDay; // 1-day buckets
   }
 
-  private calculatePercentile(sorted: number[], p: number): number {
-    if (sorted.length === 0) return 0;
+  /**
+   * Deterministic percentile calculation on sorted array.
+   * Returns null if array is empty (never returns fake 0ms).
+   */
+  public calculatePercentile(sorted: number[], p: number): number | null {
+    if (!sorted || sorted.length === 0) return null;
     const index = Math.ceil((p / 100) * sorted.length) - 1;
     return sorted[Math.max(0, Math.min(index, sorted.length - 1))];
   }
 
-  private buildEmptyResult(metricDef: MetricDefinition, from: Date, to: Date): MetricQueryResult {
+  /**
+   * Builds normalized empty result with null values rather than fake zeroes.
+   */
+  private buildEmptyResult(
+    metricDef: MetricDefinition,
+    from: Date,
+    to: Date,
+    monitorsExist = false,
+  ): MetricQueryResult {
+    const isCount = ['request_count', 'failure_count', 'timeout_count'].includes(metricDef.id);
+    const currentValue = isCount ? 0 : null;
+
     return {
       metric: metricDef.id,
       metricName: metricDef.name,
       unit: metricDef.unit,
+      value: currentValue,
+      type: 'scalar',
+      series: [],
+      from: from.toISOString(),
+      to: to.toISOString(),
       timeRange: {
         from: from.toISOString(),
         to: to.toISOString(),
       },
       summary: {
-        current: null,
-        min: 0,
-        max: 0,
-        avg: 0,
+        current: currentValue,
+        min: null,
+        max: null,
+        avg: null,
         total: 0,
-        label: 'No Data',
+        label: currentValue !== null ? `${currentValue}` : 'No Data',
       },
       timeSeries: [],
       distribution: [],

@@ -16,6 +16,34 @@ export class PreviewQueryDto {
 
   @IsString()
   @IsOptional()
+  apiId?: string;
+
+  @IsString()
+  @IsOptional()
+  environmentId?: string;
+
+  @IsString()
+  @IsOptional()
+  monitorId?: string;
+
+  @IsString()
+  @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  organizationId?: string;
+
+  @IsString()
+  @IsOptional()
+  aggregation?: string;
+
+  @IsString()
+  @IsOptional()
+  groupBy?: string;
+
+  @IsString()
+  @IsOptional()
   timeRange?: string; // "15m", "1h", "6h", "24h", "7d", "30d"
 
   @IsString()

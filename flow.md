@@ -1488,5 +1488,92 @@ Scenario B: Bottom query pane is open, user clicks "+ Add visualization":
    - Clicking [Inspect] opens <ExecutionDetailDialog /> displaying full metadata without exposing sensitive credentials
 ```
 
+---
+
+## 8. Phase 3: Real Metrics & Dashboard Data Layer Flow
+
+### Flow 8.1: Dedicated Metric Query Pipeline (`POST /dashboards/metrics/query`)
+
+```text
+Dashboard / Metric Explorer / Preview Drawer
+      │
+      │  POST /api/v1/dashboards/metrics/query
+      │  Payload: { metric, timeRange, from, to, apiId, environmentId, monitorId, groupBy }
+      ▼
+backend/src/dashboards/dashboards.controller.ts
+      │  @Post('metrics/query') queryMetric(@Body() dto: PreviewQueryDto)
+      ▼
+backend/src/dashboards/dashboards.service.ts
+      │  previewQuery(dto)
+      │  Resolves time window via this.resolveTimeWindow(timeRange, from, to)
+      ▼
+backend/src/dashboards/services/metric-query.service.ts
+      │  query(options: MetricQueryOptions):
+      │  1. Validates metric identifier against METRIC_REGISTRY
+      │  2. Validates time range: from <= to, range <= 365 days
+      │  3. Resolves target monitors scoped to authorized organization/project/api/env
+      │  4. Delegates raw data retrieval to MetricDataSource
+      ▼
+backend/src/dashboards/data-sources/postgres-metric-data-source.service.ts
+      │  PostgresMetricDataSource.getExecutions({ monitorIds, from, to })
+      │  Executes indexed Prisma query selecting only essential numeric columns:
+      │  prisma.monitorExecution.findMany({
+      │    where: { monitorId: { in: monitorIds }, executedAt: { gte: from, lte: to } },
+      │    select: { id, monitorId, status, statusCode, responseTimeMs, responseSize, executedAt }
+      │  })
+      ▼
+backend/src/dashboards/services/metric-query.service.ts
+      │  Calculates aggregates:
+      │  - Availability & Success Rate: (successful / total) * 100
+      │  - Error Rate: (failed / total) * 100
+      │  - Percentiles (P50, P90, P95, P99) via deterministic nearest-rank index
+      │  - Latency bounds (min, max, avg) ignoring null/aborted checks
+      │  - Dynamic time-series bucketing:
+      │      <=1h (1m), <=6h (5m), <=24h (15m), <=7d (1h), <=30d (6h), >30d (24h)
+      │  - Empty-bucket safety: latencies return null (never fake 0ms); counts return 0
+      │  - Normalized return:
+      │      { metric, value, type, series, summary, timeSeries, distribution, table }
+      ▼
+frontend/src/components/dashboards/renderers/WidgetRenderer.tsx
+      │  Passes data to specialized visualizers based on widget.visualizationType:
+      ├──► StatRenderer (<StatRenderer data={data} metric={metric} />)
+      ├──► TimeSeriesRenderer (<TimeSeriesRenderer data={data} metric={metric} />)
+      ├──► BarChartRenderer (<BarChartRenderer data={data} metric={metric} />)
+      ├──► GaugeRenderer (<GaugeRenderer data={data} metric={metric} />)
+      └──► TableRenderer (<TableRenderer data={data} metric={metric} />)
+```
+
+### Flow 8.2: Full Dashboard Telemetry Resolution & Filter Precedence (`GET /dashboards/:id/data`)
+
+```text
+1. Frontend Workspace Interaction:
+   User views dashboard, selects Global Filter (API: Payment API, Environment: Production, Time: Last 24h)
+      │
+      ▼
+2. Frontend API Request:
+   frontend/src/pages/DashboardViewPage.tsx -> refreshTelemetry()
+   api.getDashboardData(id, timeRange, from, to, selectedApiId, selectedEnvironmentId)
+   GET /api/v1/dashboards/:id/data?timeRange=24h&apiId=api-123&environmentId=env-456
+      │
+      ▼
+3. Backend Service Resolution:
+   backend/src/dashboards/dashboards.service.ts -> getDashboardData()
+   - Loads Dashboard and all child DashboardWidget entities ordered by layout
+   - Evaluates Filter Precedence for each widget:
+       effectiveApiId = widget.configuration.apiId || globalApiId
+       effectiveEnvironmentId = widget.configuration.environmentId || globalEnvironmentId
+       effectiveMonitorId = widget.configuration.monitorId || globalMonitorId
+       effectiveTimeRange = widget.configuration.timeRange || globalTimeRange
+   - Dispatches parallel MetricQueryService.query() for all widgets
+   - Attaches resolved metric data (`data` and `telemetry`) to each widget response
+      │
+      ▼
+4. Frontend Dashboard Rendering:
+   - DashboardViewPage receives full DashboardDataResponse
+   - Grid layout preserves widget coordinates (x, y, width, height)
+   - Every widget displays real telemetry or explicit empty state ("No Telemetry Recorded")
+   - Auto-refresh timer periodically re-fetches telemetry without full browser reloads
+```
+
 
 

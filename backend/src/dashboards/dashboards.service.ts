@@ -253,6 +253,9 @@ export class DashboardsService {
     fromStr?: string,
     toStr?: string,
     organizationId?: string,
+    globalApiId?: string,
+    globalEnvironmentId?: string,
+    globalMonitorId?: string,
   ) {
     const dashboard = await this.findOne(dashboardId, organizationId);
     const { from, to, label } = this.resolveTimeWindow(timeRange, fromStr, toStr);
@@ -260,18 +263,33 @@ export class DashboardsService {
     const widgetsWithData = await Promise.all(
       dashboard.widgets.map(async (w) => {
         const config = (w.configuration as any) || {};
+
+        // Section 44 & 45: Filter Precedence (Widget-specific > Dashboard global > Default)
+        const effectiveApiId = config.apiId || globalApiId;
+        const effectiveEnvironmentId = config.environmentId || globalEnvironmentId;
+        const effectiveMonitorId = config.monitorId || globalMonitorId;
+
+        // Widget-specific time range override
+        let widgetFrom = from;
+        let widgetTo = to;
+        if (config.timeRange && config.timeRange !== timeRange) {
+          const resolved = this.resolveTimeWindow(config.timeRange);
+          widgetFrom = resolved.from;
+          widgetTo = resolved.to;
+        }
+
         const queryFilters = {
           projectId: dashboard.projectId,
-          apiId: config.apiId,
-          environmentId: config.environmentId,
-          monitorId: config.monitorId,
+          apiId: effectiveApiId,
+          environmentId: effectiveEnvironmentId,
+          monitorId: effectiveMonitorId,
         };
 
         const metricData = await this.metricQueryService.query({
           metric: w.metric,
           filters: queryFilters,
-          from,
-          to,
+          from: widgetFrom,
+          to: widgetTo,
         });
 
         return {
@@ -285,6 +303,7 @@ export class DashboardsService {
           height: w.height,
           configuration: w.configuration,
           data: metricData,
+          telemetry: metricData.summary,
         };
       }),
     );
@@ -307,12 +326,15 @@ export class DashboardsService {
     };
   }
 
-  async previewQuery(dto: PreviewQueryDto) {
+  async previewQuery(dto: PreviewQueryDto & { apiId?: string; environmentId?: string; monitorId?: string }) {
     const { from, to } = this.resolveTimeWindow(dto.timeRange, dto.from, dto.to);
 
     return this.metricQueryService.query({
       metric: dto.metric,
       filters: dto.filters,
+      apiId: dto.apiId || dto.filters?.apiId,
+      environmentId: dto.environmentId || dto.filters?.environmentId,
+      monitorId: dto.monitorId || dto.filters?.monitorId,
       from,
       to,
     });

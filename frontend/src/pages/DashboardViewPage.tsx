@@ -76,7 +76,14 @@ export function DashboardViewPage() {
     setIsLoading(true);
     try {
       const [data, cat, apisList, envsList, monsList] = await Promise.all([
-        api.getDashboardData(dashboardId, timeRange),
+        api.getDashboardData(
+          dashboardId,
+          timeRange,
+          undefined,
+          undefined,
+          selectedApiId || undefined,
+          selectedEnvironmentId || undefined,
+        ),
         api.getMetricCatalog().catch(() => []),
         api.getApis().catch(() => []),
         api.getEnvironments().catch(() => []),
@@ -102,7 +109,14 @@ export function DashboardViewPage() {
       if (!id) return;
       if (showLoadingSpinner) setIsRefreshing(true);
       try {
-        const data = await api.getDashboardData(id, timeRange);
+        const data = await api.getDashboardData(
+          id,
+          timeRange,
+          undefined,
+          undefined,
+          selectedApiId || undefined,
+          selectedEnvironmentId || undefined,
+        );
         setDashboardData(data);
         setWidgets(data.widgets || []);
       } catch (err) {
@@ -111,15 +125,15 @@ export function DashboardViewPage() {
         if (showLoadingSpinner) setIsRefreshing(false);
       }
     },
-    [id, timeRange],
+    [id, timeRange, selectedApiId, selectedEnvironmentId],
   );
 
-  // Trigger refresh when global time range changes
+  // Trigger refresh when global time range or filters change
   useEffect(() => {
     if (id && !isLoading) {
       refreshTelemetry();
     }
-  }, [id, timeRange, refreshTelemetry]);
+  }, [id, timeRange, selectedApiId, selectedEnvironmentId, refreshTelemetry]);
 
   // 3. Auto Refresh Interval Handling
   useEffect(() => {
@@ -300,13 +314,8 @@ export function DashboardViewPage() {
 
   const { dashboard } = dashboardData;
 
-  // Filter widgets by global scope if configured
-  const displayedWidgets = widgets.filter((w) => {
-    const conf = (w.configuration as Record<string, any>) || {};
-    if (selectedApiId && conf.apiId && conf.apiId !== selectedApiId) return false;
-    if (selectedEnvironmentId && conf.environmentId && conf.environmentId !== selectedEnvironmentId) return false;
-    return true;
-  });
+  // All widgets render their metrics computed according to filter precedence (Widget > Global > Default)
+  const displayedWidgets = widgets;
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-background text-foreground">
