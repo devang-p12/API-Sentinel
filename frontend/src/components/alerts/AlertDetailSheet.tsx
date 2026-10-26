@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import {
   api,
   type AlertInstance,
@@ -317,6 +318,50 @@ export function AlertDetailSheet({
                 <HugeiconsIcon icon={copiedFingerprint ? CheckmarkCircle02Icon : Copy01Icon} className="size-3" />
               </button>
             </div>
+          </div>
+
+          {/* Related Incident (Section 30) */}
+          <div className="p-3 bg-muted/20 border border-border space-y-2">
+            <span className="block text-[11px] font-semibold text-foreground">Related Incident</span>
+            {alert.incidentAlerts && alert.incidentAlerts.length > 0 ? (
+              <div className="flex items-center justify-between p-2.5 rounded bg-card border border-border text-xs">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-[10px] font-mono h-5">
+                      INC-{alert.incidentAlerts[0].incident.id.slice(0, 8)}
+                    </Badge>
+                    <span className="font-semibold text-foreground">
+                      {alert.incidentAlerts[0].incident.title}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-muted-foreground flex items-center gap-2">
+                    <span className="font-medium text-foreground">{alert.incidentAlerts[0].incident.severity}</span>
+                    <span>•</span>
+                    <span
+                      className={
+                        alert.incidentAlerts[0].incident.status === 'OPEN'
+                          ? 'text-destructive font-semibold'
+                          : alert.incidentAlerts[0].incident.status === 'ACKNOWLEDGED'
+                          ? 'text-amber-500 font-semibold'
+                          : 'text-emerald-500 font-semibold'
+                      }
+                    >
+                      {alert.incidentAlerts[0].incident.status}
+                    </span>
+                  </div>
+                </div>
+                <Link
+                  to="/incidents"
+                  className="text-primary hover:underline text-xs font-medium px-2 py-1 bg-primary/10 rounded"
+                >
+                  View Incidents
+                </Link>
+              </div>
+            ) : (
+              <div className="text-xs text-muted-foreground italic py-1">
+                No active incident associated with this alert.
+              </div>
+            )}
           </div>
 
           {/* Metric Time Series Chart */}

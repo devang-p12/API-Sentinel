@@ -743,3 +743,88 @@ Active Verification Knowledge Base
 10. **How does the Alert Engine avoid duplicating metric calculations?**
     - The Alert Engine queries `MetricQueryService.query()` directly.
     - Because `MetricQueryService` is the single source of truth for all metric math (nearest-rank percentiles, error rates, SLA availability), the Alert Engine and Dashboard Widgets always observe the exact same values without diverging formulas.
+
+---
+
+## QUIZ-012 — Incident Management & Alert Correlation (Phase 5B)
+
+**Feature:**
+Incident Management & Alert Correlation Engine
+
+**Date:**
+2026-10-26
+
+**Status:**
+Stored / Verified
+
+**Purpose:**
+Review and verification of production incident correlation, multi-alert grouping, stateful incident lifecycles, and audit timelines.
+
+### Concepts
+- AlertRule vs AlertInstance vs Incident
+- Deterministic alert correlation strategy
+- Incident deduplication
+- Incident lifecycle (`OPEN` -> `ACKNOWLEDGED` -> `RESOLVED`)
+- Dynamic severity escalation (`CRITICAL` > `HIGH` > `WARNING` > `INFO`)
+- Human acknowledgment vs active monitoring
+- Automatic multi-alert resolution
+- Immutable incident event timeline
+- Concurrency control with advisory locks
+- Manual resolution safety & re-violation handling
+
+### Questions & Comprehensive Answers
+
+1. **What is the fundamental difference between an AlertRule, an AlertInstance, and an Incident?**
+   - **AlertRule**: A static configuration template defining what metric to evaluate, what threshold operator to check, and what timing window to use (e.g., `p95_latency > 1000ms FOR 2m`).
+   - **AlertInstance**: A concrete occurrence of a specific resource breaching that rule at a given point in time (e.g., `Payment API (Prod): p95_latency = 1420ms (FIRING)`).
+   - **Incident**: An aggregated operational problem representing a system-level degradation that correlates and groups one or more related alert instances affecting a resource boundary (e.g., `INC-afec9ae7: Payment API Production Degradation (CRITICAL)`).
+
+2. **Why must Alerts and Incidents NOT be modeled as the same entity?**
+   - When a service fails (e.g. database pool exhaustion), multiple alerts breach simultaneously: latency jumps, error rate exceeds 5%, and availability plummets.
+   - If each alert created an incident, on-call teams would be bombarded with 3-4 separate incidents for the exact same underlying failure.
+   - Treating incidents as a higher-level aggregation allows all correlated symptoms to be grouped into one incident ticket with a unified timeline, a single acknowledgment state, and accurate MTTR measurement.
+
+3. **How does Sentinel's correlation engine decide whether two firing alerts belong to the same incident?**
+   - Sentinel applies a deterministic correlation key:
+     ```text
+     CorrelationKey = hash(projectId + apiId + environmentId)
+     ```
+   - Two firing alert instances belong to the same incident if they share the same project, target API, and environment.
+   - If an active (`OPEN` or `ACKNOWLEDGED`) incident already exists for that scope, new firing alerts attach to it via `IncidentAlert`. If none exists, Sentinel creates a new incident.
+
+4. **Why should alerts for unrelated APIs create separate incidents?**
+   - If the `Payment API` experiences latency and the `User API` experiences an error rate spike, these represent distinct operational domains managed by potentially different engineering teams with different blast radiuses.
+   - Merging unrelated APIs into a single incident would create massive confusion, muddy ownership, and prevent closing an incident when one service recovers while the other remains broken.
+
+5. **How does Sentinel handle incident severity when multiple alerts of different severities attach to the same incident?**
+   - Incident severity follows a strict priority hierarchy:
+     ```text
+     CRITICAL (3) > HIGH (2) > WARNING (1) > INFO (0)
+     ```
+   - An incident always reflects the **highest severity** among its active correlated alerts. If an incident starts at `WARNING` (due to high latency) and a `CRITICAL` alert subsequently fires (due to error rate > 20%), the incident escalates to `CRITICAL` and records a `SEVERITY_CHANGED` audit event on its timeline.
+
+6. **What happens when an engineer acknowledges an incident (`POST /incidents/:id/acknowledge`)? Does monitoring stop?**
+   - The incident transitions from `OPEN` to `ACKNOWLEDGED`, and Sentinel records `acknowledgedAt` and `acknowledgedBy`.
+   - **Monitoring does NOT stop.** Background workers continue executing probes and evaluating metrics every cycle. Acknowledgment signals human engagement to team members without altering telemetry evaluation.
+
+7. **When does an incident automatically resolve? Why does it not resolve when the first alert recovers?**
+   - An incident resolves **only when ALL attached alert instances have recovered** (`status === AlertState.RESOLVED`).
+   - If an incident has both a latency alert and an error rate alert, and latency recovers while errors are still firing, the incident remains active (`OPEN` or `ACKNOWLEDGED`).
+   - Resolving when the first alert recovers would prematurely mark outages as resolved while downstream customer-facing errors are still actively occurring.
+
+8. **What is the purpose of the `IncidentEvent` model and vertical timeline?**
+   - The timeline provides an immutable, chronological audit trail recording every state change: `CREATED`, `ALERT_ATTACHED`, `SEVERITY_CHANGED`, `ACKNOWLEDGED`, `ALERT_RESOLVED`, and `RESOLVED`.
+   - During post-incident reviews (PIR), engineers can reconstruct the exact second-by-second sequence of events, identifying which alert triggered first, how severity evolved, and who acknowledged or resolved the incident.
+
+9. **What happens if an engineer manually resolves an incident while an alert is still firing? How does Sentinel prevent infinite incident creation loops?**
+   - The incident transitions to `RESOLVED` and records `resolvedBy`.
+   - If the attached alert continues firing, Sentinel's state machine does not trigger incident creation on every tick because the alert's state remains `FIRING` (`previousState === FIRING`).
+   - Sentinel only initiates correlation when an alert transitions `PENDING -> FIRING` (a new violation). Thus, continuously firing alerts do not spawn an infinite cascade of duplicate incidents.
+
+10. **How does Sentinel prevent race conditions when two background workers evaluate correlated alerts at the exact same millisecond?**
+    - Sentinel enforces concurrency safety via PostgreSQL transaction advisory locks:
+      ```sql
+      SELECT pg_advisory_xact_lock(hashtext(correlationKey));
+      ```
+    - The first worker acquires the lock, checks for an active incident, and creates it if absent. The second worker waits for the first transaction to commit, then acquires the lock and finds the newly created incident, attaching its alert cleanly without duplicate incident creation.
+

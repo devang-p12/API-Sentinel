@@ -35,7 +35,7 @@ export function MetricsOverview({ monitors, incidents }: MetricsOverviewProps) {
     latencyRunsCount > 0 ? Math.round(sumLatency / latencyRunsCount) : 0;
 
   const activeIncidents = incidents.filter(
-    (inc) => inc.status === 'TRIGGERED' || inc.status === 'ACKNOWLEDGED',
+    (inc) => inc.status === 'OPEN' || inc.status === 'TRIGGERED' || inc.status === 'ACKNOWLEDGED',
   );
 
   return (

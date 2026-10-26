@@ -122,6 +122,18 @@ export class AlertInstancesService {
           orderBy: { evaluatedAt: 'desc' },
           take: 50,
         },
+        incidentAlerts: {
+          include: {
+            incident: {
+              include: {
+                project: { select: { id: true, name: true } },
+                api: { select: { id: true, name: true } },
+                environment: { select: { id: true, name: true } },
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
       },
     });
 

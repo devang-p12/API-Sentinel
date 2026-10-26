@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { MetricQueryService } from '../../dashboards/services/metric-query.service';
 import { AlertFingerprintService } from './alert-fingerprint.service';
 import { AlertStateMachineService } from './alert-state-machine.service';
+import { IncidentCorrelationService } from '../../incidents/incident-correlation.service';
 
 export interface AlertEvaluationResult {
   ruleId: string;
@@ -36,6 +37,7 @@ export class AlertEvaluationService {
     private readonly metricQueryService: MetricQueryService,
     private readonly fingerprintService: AlertFingerprintService,
     private readonly stateMachineService: AlertStateMachineService,
+    private readonly incidentCorrelationService?: IncidentCorrelationService,
   ) {}
 
   /**
@@ -192,6 +194,29 @@ export class AlertEvaluationService {
         `previousState=${result.previousState} newState=${result.newState} ` +
         `fingerprint=${fingerprint}`,
     );
+
+    // 6. Phase 5B: Incident Management & Alert Correlation (Section 9, 12, 15)
+    if (result.savedInstanceId && this.incidentCorrelationService) {
+      if (result.newState === AlertState.FIRING && result.previousState !== AlertState.FIRING) {
+        try {
+          await this.incidentCorrelationService.correlateAlertInstance(result.savedInstanceId);
+        } catch (err: any) {
+          this.logger.error(
+            `[IncidentEngine] Failed to correlate AlertInstance ${result.savedInstanceId}: ${err.message}`,
+            err.stack,
+          );
+        }
+      } else if (result.newState === AlertState.RESOLVED && result.previousState === AlertState.FIRING) {
+        try {
+          await this.incidentCorrelationService.handleAlertInstanceResolved(result.savedInstanceId);
+        } catch (err: any) {
+          this.logger.error(
+            `[IncidentEngine] Failed to handle AlertInstance resolution ${result.savedInstanceId}: ${err.message}`,
+            err.stack,
+          );
+        }
+      }
+    }
 
     return {
       ruleId: rule.id,

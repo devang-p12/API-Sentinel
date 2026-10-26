@@ -11,7 +11,7 @@ interface IncidentBannerProps {
 
 export function IncidentBanner({ incidents, onAcknowledge, onResolve }: IncidentBannerProps) {
   const activeIncidents = incidents.filter(
-    (i) => i.status === 'TRIGGERED' || i.status === 'ACKNOWLEDGED',
+    (i) => i.status === 'OPEN' || i.status === 'TRIGGERED' || i.status === 'ACKNOWLEDGED',
   );
 
   if (activeIncidents.length === 0) {

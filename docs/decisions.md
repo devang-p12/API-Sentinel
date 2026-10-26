@@ -860,3 +860,44 @@ Implement **Phase 5A: Production-Grade Alert Engine** with the following foundat
 
 **Date:**
 2026-10-26
+
+---
+
+## ADR-025: Incident Management, Alert Correlation, and Multi-Alert Outage Lifecycle (Phase 5B)
+
+**Decision:**
+Implement a dedicated **Incident Management & Alert Correlation** layer decoupled from the Alert Engine, grouping multiple related firing `AlertInstance` records into a single operational `Incident` based on deterministic resource scoping (`projectId` + `apiId` + `environmentId`), maintaining an immutable chronological audit trail (`IncidentEvent`), and managing automated resolution only after all correlated alerts recover.
+
+**Reasoning Behind Architectural Decisions:**
+
+1. **Why `Alert` $\neq$ `Incident`:**
+   - An *Alert Rule* specifies what metric condition to check (`p95_latency > 1000ms`).
+   - An *Alert Instance* represents a specific metric violation on a concrete resource at a given time (`Payment API / Prod: p95 = 1420ms (FIRING)`).
+   - An *Incident* represents a broader operational problem or outage that impacts users or systems, which typically triggers multiple correlated alerts across different metrics (e.g. latency, error rate, gateway timeouts).
+   - Conflating alerts with incidents leads to alert storm spam, fragmented incident numbers, duplicate communication threads, and inaccurate Mean Time to Detect (MTTD) and Mean Time to Resolve (MTTR) metrics.
+
+2. **Why Multiple Alerts Belong to One Incident:**
+   - System failures are cascading: a slow database pool immediately triggers high latency, which causes queue exhaustion, leading to HTTP 504 timeouts, which finally causes an availability drop.
+   - Operators investigating an outage need a single source of truth containing all relevant symptoms, not four separate incident tickets. Correlating multiple alerts under one incident gives on-call engineers unified situational awareness.
+
+3. **Why Correlation Uses `projectId` + `apiId` + `environmentId`:**
+   - For Phase 5B, a deterministic scoping key (`hash(projectId + apiId + environmentId)`) provides 100% predictable, reproducible grouping behavior without unpredictable machine-learning or black-box heuristics.
+   - Outages on `Payment API (Production)` and `Payment API (Production)` correlate into the same operational event, while outages on `User API (Production)` or `Payment API (Development)` remain properly isolated into separate incidents.
+
+4. **Why Complex Machine Learning & Anomaly Correlation is Postponed:**
+   - Advanced ML clustering, graph dependency topologies, and automatic root-cause analysis introduce significant non-determinism, require large training datasets, and are prone to false-positive grouping.
+   - Establishing a deterministic, rock-solid correlation baseline first ensures that future ML or topological correlation engines (Phase 7+) can be plugged in cleanly without altering the underlying data models.
+
+5. **Why Notification Routing is Deferred to Phase 6:**
+   - Notification dispatching (Email, Slack, Discord, Webhooks, PagerDuty), contact points, and notification policies belong strictly to Phase 6.
+   - Decoupling correlation from notifications prevents cascading webhook timeouts, API rate limits, and un-grouped notification storms during massive cascading outages.
+
+**Consequences:**
+- Incidents automatically aggregate all related alerts occurring within the same service boundary.
+- Severity escalates dynamically to the highest severity among all active alerts (`CRITICAL > HIGH > WARNING > INFO`).
+- Incidents resolve automatically only when all attached alert instances recover, preventing premature incident closure.
+- Concurrency across multiple workers is strictly serialized using PostgreSQL transaction advisory locks on the correlation key.
+
+**Date:**
+2026-10-26
+

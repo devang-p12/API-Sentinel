@@ -1694,5 +1694,104 @@ api.createAlertRule() ──► POST /api/v1/alert-rules
 AlertRule is saved to PostgreSQL and immediately scheduled for continuous evaluation!
 ```
 
+---
+
+## 10. Phase 5B: Incident Management & Alert Correlation Flow
+
+### Flow 10.1: Alert Firing to Incident Correlation Lifecycle
+
+```text
+AlertEvaluationService: AlertInstance transitions to FIRING
+       │
+       ▼
+IncidentCorrelationService.correlateAlertInstance(alertInstanceId)
+       │
+       ├── 1. Generate Deterministic Correlation Key:
+       │      correlationKey = "incident_corr:" + projectId + ":" + apiId + ":" + envId
+       │
+       ├── 2. Concurrency Safety:
+       │      SELECT pg_advisory_xact_lock(hashtext(correlationKey))
+       │
+       ├── 3. Query Active Incident:
+       │      Find incident WHERE projectId=projectId AND apiId=apiId 
+       │      AND environmentId=environmentId AND status IN ['OPEN', 'ACKNOWLEDGED']
+       │
+       ├── 4. Branch Evaluation:
+       │      ┌─────────────────────────┴────────────────────────┐
+       │      │                                                  │
+       │   [ YES: Active Incident Found ]             [ NO: No Active Incident ]
+       │      │                                                  │
+       │      ├── Check if already attached:                     ├── Generate Human Title & Description:
+       │      │   YES: Deduplication (no-op)                     │   title = "${api.name} ${env.name} Degradation"
+       │      │   NO: Attach alert via IncidentAlert             │
+       │      │                                                  ├── Create Incident:
+       │      ├── Evaluate Severity Escalation:                  │   status: OPEN, severity: rule.severity
+       │      │   If (newSeverity > incidentSeverity):           │
+       │      │     incident.severity = newSeverity              ├── Attach alert via IncidentAlert
+       │      │     Emit IncidentEvent: SEVERITY_CHANGED         │
+       │      │                                                  └── Emit Initial Events:
+       │      └── Emit IncidentEvent: ALERT_ATTACHED                 - CREATED: "Incident opened"
+       │                                                             - ALERT_ATTACHED: "Triggering alert fired"
+       ▼
+Incident Record & Chronological Audit Timeline Updated in PostgreSQL
+```
+
+### Flow 10.2: Alert Recovery & Automatic Incident Resolution Flow
+
+```text
+AlertEvaluationService: AlertInstance transitions to RESOLVED
+       │
+       ▼
+IncidentCorrelationService.handleAlertInstanceResolved(alertInstanceId)
+       │
+       ├── 1. Find all active incidents containing this alert via IncidentAlert
+       │
+       ├── 2. For each active incident (under advisory lock on incidentId):
+       │      │
+       │      ├── Record timeline event:
+       │      │   Emit IncidentEvent: ALERT_RESOLVED
+       │      │
+       │      └── Check all attached alerts for this incident:
+       │          const hasActiveAlerts = incident.alerts.some(a => a.status === 'FIRING' || a.status === 'PENDING')
+       │          │
+       │          ├── [ Some Alerts Still Firing / Pending ]:
+       │          │   Incident remains active (OPEN or ACKNOWLEDGED).
+       │          │   No premature closure.
+       │          │
+       │          └── [ All Correlated Alerts Resolved ]:
+       │              Incident auto-resolves!
+       │              - incident.status = RESOLVED
+       │              - incident.resolvedAt = now()
+       │              - durationSeconds = resolvedAt - startedAt
+       │              - Emit IncidentEvent: RESOLVED ("All correlated alerts recovered")
+       ▼
+Incident Closed & MTTR Audit Trail Preserved
+```
+
+### Flow 10.3: Operator Acknowledgment & Manual Resolution Flow
+
+```text
+On-Call Engineer in Web UI (Incidents Page or Incident Drawer)
+       │
+       ├── Acknowledge Incident:
+       │   POST /api/v1/incidents/:id/acknowledge
+       │   ├── incident.status = ACKNOWLEDGED
+       │   ├── incident.acknowledgedAt = now()
+       │   ├── incident.acknowledgedBy = userName
+       │   ├── Emit IncidentEvent: ACKNOWLEDGED
+       │   └── Continuous monitoring and alert evaluation continue unchanged!
+       │
+       └── Manual Resolution (e.g. mitigated via rollback):
+           POST /api/v1/incidents/:id/resolve
+           ├── incident.status = RESOLVED
+           ├── incident.resolvedAt = now()
+           ├── incident.resolvedBy = userName
+           ├── Emit IncidentEvent: RESOLVED
+           └── If original alert continues firing, alert deduplication prevents
+               infinite duplicate incident generation. Only a fresh violation cycle
+               will spawn a new incident.
+```
+
+
 
 

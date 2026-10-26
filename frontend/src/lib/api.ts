@@ -62,12 +62,63 @@ export interface MonitorExecution {
   executedAt: string;
 }
 
+export type IncidentStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'TRIGGERED';
+
+export type IncidentEventType =
+  | 'CREATED'
+  | 'ALERT_ATTACHED'
+  | 'ALERT_RESOLVED'
+  | 'ACKNOWLEDGED'
+  | 'SEVERITY_CHANGED'
+  | 'RESOLVED';
+
+export interface IncidentEvent {
+  id: string;
+  incidentId: string;
+  type: IncidentEventType;
+  message: string;
+  actorType: 'SYSTEM' | 'USER';
+  actorId?: string | null;
+  metadata?: Record<string, any> | null;
+  createdAt: string;
+}
+
+export interface IncidentAlert {
+  id: string;
+  incidentId: string;
+  alertInstanceId: string;
+  alertInstance: AlertInstance;
+  createdAt: string;
+}
+
 export interface Incident {
   id: string;
-  status: 'TRIGGERED' | 'ACKNOWLEDGED' | 'RESOLVED';
-  summary: string;
+  projectId: string;
+  project?: { id: string; name: string };
+  title: string;
+  description?: string | null;
+  status: IncidentStatus;
+  severity: AlertSeverity;
+  apiId?: string | null;
+  api?: { id: string; name: string } | null;
+  environmentId?: string | null;
+  environment?: { id: string; name: string } | null;
   startedAt: string;
-  resolvedAt: string | null;
+  acknowledgedAt?: string | null;
+  resolvedAt?: string | null;
+  acknowledgedBy?: string | null;
+  resolvedBy?: string | null;
+  durationSeconds?: number;
+  alerts?: IncidentAlert[];
+  events?: IncidentEvent[];
+  _count?: {
+    alerts: number;
+    events: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+  // Backward compatibility with legacy views
+  summary?: string;
   alert?: {
     id: string;
     name: string;
@@ -79,6 +130,25 @@ export interface Incident {
     };
   };
 }
+
+export interface IncidentSummary {
+  open: number;
+  acknowledged: number;
+  resolved: number;
+  total: number;
+}
+
+export interface QueryIncidentsParams {
+  status?: string;
+  severity?: string;
+  projectId?: string;
+  apiId?: string;
+  environmentId?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
 
 export type AlertCondition =
   | 'GREATER_THAN'
@@ -144,6 +214,11 @@ export interface AlertInstance {
   createdAt: string;
   updatedAt: string;
   evaluations?: AlertEvaluation[];
+  incidentAlerts?: {
+    id: string;
+    incident: Incident;
+    createdAt: string;
+  }[];
 }
 
 export interface AlertSummary {
@@ -414,12 +489,31 @@ export const api = {
     if (to) params.set('to', to);
     return fetchJson<MonitorAnalyticsSummary>(`/monitors/${id}/analytics?${params.toString()}`);
   },
-  getIncidents: (status?: string) =>
-    fetchJson<Incident[]>(`/incidents${status ? `?status=${status}` : ''}`),
+  getIncidents: (paramsOrStatus?: QueryIncidentsParams | string) => {
+    if (typeof paramsOrStatus === 'string') {
+      return fetchJson<{ items: Incident[]; total: number }>(`/incidents?status=${paramsOrStatus}`);
+    }
+    const params = new URLSearchParams();
+    if (paramsOrStatus?.status) params.set('status', paramsOrStatus.status);
+    if (paramsOrStatus?.severity) params.set('severity', paramsOrStatus.severity);
+    if (paramsOrStatus?.projectId) params.set('projectId', paramsOrStatus.projectId);
+    if (paramsOrStatus?.apiId) params.set('apiId', paramsOrStatus.apiId);
+    if (paramsOrStatus?.environmentId) params.set('environmentId', paramsOrStatus.environmentId);
+    if (paramsOrStatus?.search) params.set('search', paramsOrStatus.search);
+    if (paramsOrStatus?.limit !== undefined) params.set('limit', String(paramsOrStatus.limit));
+    if (paramsOrStatus?.offset !== undefined) params.set('offset', String(paramsOrStatus.offset));
+    const qs = params.toString();
+    return fetchJson<{ items: Incident[]; total: number; limit: number; offset: number }>(`/incidents${qs ? `?${qs}` : ''}`);
+  },
+  getIncidentSummary: (projectId?: string) =>
+    fetchJson<IncidentSummary>(`/incidents/summary${projectId ? `?projectId=${projectId}` : ''}`),
+  getIncident: (id: string) => fetchJson<Incident>(`/incidents/${id}`),
+  getIncidentTimeline: (id: string) => fetchJson<IncidentEvent[]>(`/incidents/${id}/timeline`),
+  getIncidentAlerts: (id: string) => fetchJson<AlertInstance[]>(`/incidents/${id}/alerts`),
   acknowledgeIncident: (id: string) =>
-    fetchJson<Incident>(`/incidents/${id}/acknowledge`, { method: 'PATCH' }),
+    fetchJson<Incident>(`/incidents/${id}/acknowledge`, { method: 'POST' }),
   resolveIncident: (id: string) =>
-    fetchJson<Incident>(`/incidents/${id}/resolve`, { method: 'PATCH' }),
+    fetchJson<Incident>(`/incidents/${id}/resolve`, { method: 'POST' }),
 
   // Dashboard & Custom Visualization APIs
   getMetricCatalog: () => fetchJson<MetricDefinition[]>('/dashboards/metrics/catalog'),

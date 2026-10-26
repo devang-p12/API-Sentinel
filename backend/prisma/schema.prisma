@@ -36,9 +36,23 @@ enum ExecutionStatus {
 }
 
 enum IncidentStatus {
-  TRIGGERED
+  OPEN
   ACKNOWLEDGED
   RESOLVED
+}
+
+enum IncidentEventType {
+  CREATED
+  ALERT_ATTACHED
+  ALERT_RESOLVED
+  ACKNOWLEDGED
+  SEVERITY_CHANGED
+  RESOLVED
+}
+
+enum ActorType {
+  SYSTEM
+  USER
 }
 
 enum AlertSeverity {
@@ -109,6 +123,7 @@ model Project {
   apis       Api[]
   dashboards Dashboard[]
   alertRules AlertRule[]
+  incidents  Incident[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -126,6 +141,7 @@ model Api {
 
   environments Environment[]
   alertRules   AlertRule[]
+  incidents    Incident[]
 
   @@unique([projectId, name])
   @@index([projectId])
@@ -144,6 +160,7 @@ model Environment {
 
   monitors   Monitor[]
   alertRules AlertRule[]
+  incidents  Incident[]
 
   @@unique([apiId, name])
   @@index([apiId])
@@ -209,23 +226,69 @@ model Alert {
   createdAt DateTime      @default(now()) @map("created_at")
   updatedAt DateTime      @updatedAt @map("updated_at")
 
-  incidents Incident[]
-
   @@index([monitorId])
   @@map("alerts")
 }
 
 model Incident {
-  id         String         @id @default(uuid())
-  status     IncidentStatus @default(TRIGGERED)
-  summary    String
-  startedAt  DateTime       @default(now()) @map("started_at")
-  resolvedAt DateTime?      @map("resolved_at")
-  alertId    String         @map("alert_id")
-  alert      Alert          @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  id            String         @id @default(uuid())
+  projectId     String         @map("project_id")
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title         String
+  description   String?
+  status        IncidentStatus @default(OPEN)
+  severity      AlertSeverity  @default(WARNING)
+  apiId         String?        @map("api_id")
+  api           Api?           @relation(fields: [apiId], references: [id], onDelete: SetNull)
+  environmentId String?        @map("environment_id")
+  environment   Environment?   @relation(fields: [environmentId], references: [id], onDelete: SetNull)
 
-  @@index([alertId, status])
+  startedAt      DateTime  @default(now()) @map("started_at")
+  acknowledgedAt DateTime? @map("acknowledged_at")
+  resolvedAt     DateTime? @map("resolved_at")
+  acknowledgedBy String?   @map("acknowledged_by")
+  resolvedBy     String?   @map("resolved_by")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  alerts IncidentAlert[]
+  events IncidentEvent[]
+
+  @@index([projectId, status])
+  @@index([apiId, environmentId, status])
+  @@index([status])
+  @@index([startedAt(sort: Desc)])
   @@map("incidents")
+}
+
+model IncidentAlert {
+  id              String        @id @default(uuid())
+  incidentId      String        @map("incident_id")
+  incident        Incident      @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  alertInstanceId String        @map("alert_instance_id")
+  alertInstance   AlertInstance @relation(fields: [alertInstanceId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  @@unique([incidentId, alertInstanceId])
+  @@index([incidentId])
+  @@index([alertInstanceId])
+  @@map("incident_alerts")
+}
+
+model IncidentEvent {
+  id         String            @id @default(uuid())
+  incidentId String            @map("incident_id")
+  incident   Incident          @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  type       IncidentEventType
+  message    String
+  actorType  ActorType         @default(SYSTEM) @map("actor_type")
+  actorId    String?           @map("actor_id")
+  metadata   Json?             @default("{}")
+  createdAt  DateTime          @default(now()) @map("created_at")
+
+  @@index([incidentId, createdAt])
+  @@map("incident_events")
 }
 
 model Dashboard {
@@ -317,7 +380,8 @@ model AlertInstance {
   createdAt       DateTime   @default(now()) @map("created_at")
   updatedAt       DateTime   @updatedAt @map("updated_at")
 
-  evaluations AlertEvaluation[]
+  evaluations    AlertEvaluation[]
+  incidentAlerts IncidentAlert[]
 
   @@index([alertRuleId, status])
   @@index([fingerprint])

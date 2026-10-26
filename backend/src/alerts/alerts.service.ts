@@ -39,10 +39,6 @@ export class AlertsService {
       where: monitorId ? { monitorId } : undefined,
       include: {
         monitor: true,
-        incidents: {
-          orderBy: { startedAt: 'desc' },
-          take: 5,
-        },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -53,9 +49,6 @@ export class AlertsService {
       where: { id },
       include: {
         monitor: true,
-        incidents: {
-          orderBy: { startedAt: 'desc' },
-        },
       },
     });
 
