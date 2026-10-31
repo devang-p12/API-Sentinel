@@ -325,6 +325,15 @@ export function MonitorDetailPage() {
             <span>Back to Monitors</span>
           </Link>
 
+          <Link
+            to={`/api-tester?url=${encodeURIComponent(composedUrl)}&method=${monitor.method}&apiId=${monitor.environment?.api?.id || ''}&environmentId=${monitor.environmentId || ''}`}
+            className={buttonVariants({ variant: "outline", size: "sm", className: "gap-1.5" })}
+            title="Open and inspect this probe inside API Tester"
+          >
+            <HugeiconsIcon icon={PlayIcon} className="size-3.5 text-primary" />
+            <span>Open in API Tester</span>
+          </Link>
+
           {/* Section 36: Run Now Button & Result Pill */}
           <Button
             size="sm"

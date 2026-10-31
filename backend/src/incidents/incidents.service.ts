@@ -1,11 +1,17 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { ActorType, IncidentEventType, IncidentStatus, Prisma } from '@prisma/client';
+import { Injectable, NotFoundException, Optional, Logger } from '@nestjs/common';
+import { ActorType, IncidentEventType, IncidentStatus, Prisma, NotificationEventType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueryIncidentsDto } from './dto/query-incidents.dto';
+import { NotificationRoutingService } from '../notifications/services/notification-routing.service';
 
 @Injectable()
 export class IncidentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(IncidentsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly notificationRoutingService?: NotificationRoutingService,
+  ) {}
 
   private mapIncidentWithDuration(incident: any) {
     const now = Date.now();
@@ -200,6 +206,19 @@ export class IncidentsService {
 
       return inc;
     });
+
+    if (this.notificationRoutingService) {
+      try {
+        await this.notificationRoutingService.routeIncidentNotification(
+          id,
+          NotificationEventType.RECOVERY,
+        );
+      } catch (err: any) {
+        this.logger.error(
+          `[NotificationRouting] Failed to route manual RECOVERY notification for Incident ${id}: ${err.message}`,
+        );
+      }
+    }
 
     return this.findOne(updated.id);
   }

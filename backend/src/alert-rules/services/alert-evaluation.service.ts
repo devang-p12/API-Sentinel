@@ -1,10 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { AlertState } from '@prisma/client';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { AlertState, NotificationEventType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MetricQueryService } from '../../dashboards/services/metric-query.service';
 import { AlertFingerprintService } from './alert-fingerprint.service';
 import { AlertStateMachineService } from './alert-state-machine.service';
 import { IncidentCorrelationService } from '../../incidents/incident-correlation.service';
+import { AlertRuleNotificationService } from './alert-rule-notification.service';
 
 export interface AlertEvaluationResult {
   ruleId: string;
@@ -37,7 +38,8 @@ export class AlertEvaluationService {
     private readonly metricQueryService: MetricQueryService,
     private readonly fingerprintService: AlertFingerprintService,
     private readonly stateMachineService: AlertStateMachineService,
-    private readonly incidentCorrelationService?: IncidentCorrelationService,
+    @Optional() private readonly incidentCorrelationService?: IncidentCorrelationService,
+    @Optional() private readonly alertRuleNotificationService?: AlertRuleNotificationService,
   ) {}
 
   /**
@@ -63,8 +65,18 @@ export class AlertEvaluationService {
     const now = new Date();
 
     // 1. Calculate time window to query from MetricQueryService
-    // Use at least 5 minutes or 2x duration window
-    const windowMs = Math.max((rule.duration || 60) * 2000, 5 * 60 * 1000);
+    // Priority: configured evaluation window in labels > duration window > 5m default
+    let windowMs = Math.max((rule.duration || 60) * 2000, 5 * 60 * 1000);
+    const labelWindow = (rule.labels as any)?._evaluationWindow;
+    if (typeof labelWindow === 'string') {
+      const match = labelWindow.match(/^(\d+)([smhd])$/);
+      if (match) {
+        const val = parseInt(match[1], 10);
+        const unit = match[2];
+        const mult = unit === 's' ? 1000 : unit === 'm' ? 60000 : unit === 'h' ? 3600000 : 86400000;
+        windowMs = val * mult;
+      }
+    }
     const from = new Date(now.getTime() - windowMs);
     const to = now;
 
@@ -196,24 +208,58 @@ export class AlertEvaluationService {
     );
 
     // 6. Phase 5B: Incident Management & Alert Correlation (Section 9, 12, 15)
-    if (result.savedInstanceId && this.incidentCorrelationService) {
+    if (result.savedInstanceId) {
       if (result.newState === AlertState.FIRING && result.previousState !== AlertState.FIRING) {
-        try {
-          await this.incidentCorrelationService.correlateAlertInstance(result.savedInstanceId);
-        } catch (err: any) {
-          this.logger.error(
-            `[IncidentEngine] Failed to correlate AlertInstance ${result.savedInstanceId}: ${err.message}`,
-            err.stack,
-          );
+        if (this.incidentCorrelationService) {
+          try {
+            await this.incidentCorrelationService.correlateAlertInstance(result.savedInstanceId);
+          } catch (err: any) {
+            this.logger.error(
+              `[IncidentEngine] Failed to correlate AlertInstance ${result.savedInstanceId}: ${err.message}`,
+              err.stack,
+            );
+          }
+        }
+
+        // Email notifications for alert rule entering FIRING state
+        if (this.alertRuleNotificationService) {
+          try {
+            await this.alertRuleNotificationService.sendAlertRuleNotification(
+              rule.id,
+              result.savedInstanceId,
+              NotificationEventType.FIRING,
+            );
+          } catch (err: any) {
+            this.logger.error(
+              `[AlertNotification] Failed to send FIRING email notification for rule ${rule.id}: ${err.message}`,
+            );
+          }
         }
       } else if (result.newState === AlertState.RESOLVED && result.previousState === AlertState.FIRING) {
-        try {
-          await this.incidentCorrelationService.handleAlertInstanceResolved(result.savedInstanceId);
-        } catch (err: any) {
-          this.logger.error(
-            `[IncidentEngine] Failed to handle AlertInstance resolution ${result.savedInstanceId}: ${err.message}`,
-            err.stack,
-          );
+        if (this.incidentCorrelationService) {
+          try {
+            await this.incidentCorrelationService.handleAlertInstanceResolved(result.savedInstanceId);
+          } catch (err: any) {
+            this.logger.error(
+              `[IncidentEngine] Failed to handle AlertInstance resolution ${result.savedInstanceId}: ${err.message}`,
+              err.stack,
+            );
+          }
+        }
+
+        // Email notifications for alert rule recovering to RESOLVED state
+        if (this.alertRuleNotificationService) {
+          try {
+            await this.alertRuleNotificationService.sendAlertRuleNotification(
+              rule.id,
+              result.savedInstanceId,
+              NotificationEventType.RECOVERY,
+            );
+          } catch (err: any) {
+            this.logger.error(
+              `[AlertNotification] Failed to send RECOVERY email notification for rule ${rule.id}: ${err.message}`,
+            );
+          }
         }
       }
     }

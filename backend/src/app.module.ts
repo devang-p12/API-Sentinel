@@ -10,6 +10,9 @@ import { AlertsModule } from './alerts/alerts.module';
 import { AlertRulesModule } from './alert-rules/alert-rules.module';
 import { IncidentsModule } from './incidents/incidents.module';
 import { DashboardsModule } from './dashboards/dashboards.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { LoadTestsModule } from './load-tests/load-tests.module';
+import { ApiTesterModule } from './api-tester/api-tester.module';
 import { BootstrapService } from './common/bootstrap.service';
 
 @Module({
@@ -25,6 +28,9 @@ import { BootstrapService } from './common/bootstrap.service';
     AlertRulesModule,
     IncidentsModule,
     DashboardsModule,
+    NotificationsModule,
+    LoadTestsModule,
+    ApiTesterModule,
   ],
   providers: [BootstrapService],
 })

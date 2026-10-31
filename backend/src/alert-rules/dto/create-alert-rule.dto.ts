@@ -65,6 +65,10 @@ export class CreateAlertRuleDto {
   @IsOptional()
   labels?: Record<string, any>;
 
+  @IsObject()
+  @IsOptional()
+  notificationConfig?: Record<string, any>;
+
   @IsBoolean()
   @IsOptional()
   enabled?: boolean;

@@ -20,6 +20,8 @@ import {
   Add01Icon,
   Edit01Icon,
   Delete01Icon,
+  FlashIcon,
+  PlayIcon,
 } from "@hugeicons/core-free-icons"
 import { EnvironmentFormDialog } from "@/components/environments/EnvironmentFormDialog"
 
@@ -111,6 +113,20 @@ export function ApiDetailPage() {
           >
             <HugeiconsIcon icon={ArrowLeft01Icon} className="size-3.5" />
             <span>Back to APIs</span>
+          </Link>
+          <Link
+            to={`/api-tester?apiId=${service?.id || id}`}
+            className={buttonVariants({ variant: "outline", size: "sm", className: "gap-1.5" })}
+          >
+            <HugeiconsIcon icon={PlayIcon} className="size-3.5 text-primary" />
+            <span>Open in API Tester</span>
+          </Link>
+          <Link
+            to={`/load-tests/new?apiId=${service?.id || id}`}
+            className={buttonVariants({ variant: "outline", size: "sm", className: "gap-1.5" })}
+          >
+            <HugeiconsIcon icon={FlashIcon} className="size-3.5 text-amber-500" />
+            <span>Run Load Test</span>
           </Link>
           <Button size="sm" className="gap-1.5" onClick={handleOpenAdd}>
             <HugeiconsIcon icon={Add01Icon} className="size-3.5" />

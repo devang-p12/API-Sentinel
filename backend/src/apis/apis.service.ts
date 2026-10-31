@@ -22,6 +22,7 @@ export class ApisService {
         projectId: dto.projectId,
       },
       include: {
+        project: true,
         environments: true,
       },
     });
@@ -31,6 +32,7 @@ export class ApisService {
     return this.prisma.api.findMany({
       where: projectId ? { projectId } : undefined,
       include: {
+        project: true,
         environments: {
           include: {
             monitors: true,
@@ -45,6 +47,7 @@ export class ApisService {
     const api = await this.prisma.api.findUnique({
       where: { id },
       include: {
+        project: true,
         environments: {
           include: {
             monitors: true,

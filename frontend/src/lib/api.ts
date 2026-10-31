@@ -1,3 +1,5 @@
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
+
 export interface Project {
   id: string;
   name: string;
@@ -10,6 +12,7 @@ export interface Api {
   name: string;
   description?: string;
   projectId: string;
+  project?: Project;
   environments?: Environment[];
 }
 
@@ -161,6 +164,16 @@ export type AlertCondition =
 export type AlertState = 'NORMAL' | 'PENDING' | 'FIRING' | 'RESOLVED';
 export type AlertSeverity = 'INFO' | 'WARNING' | 'HIGH' | 'CRITICAL';
 
+export interface AlertRuleNotificationConfig {
+  email?: {
+    enabled: boolean;
+    recipients: string[];
+    onFiring: boolean;
+    onResolved: boolean;
+    repeatInterval?: number; // in minutes, 0 = disabled
+  };
+}
+
 export interface AlertRule {
   id: string;
   name: string;
@@ -180,11 +193,15 @@ export interface AlertRule {
   evaluationInterval: number; // in seconds
   severity: AlertSeverity;
   labels?: Record<string, any> | null;
+  notificationConfig?: AlertRuleNotificationConfig | null;
   enabled: boolean;
   createdBy?: string | null;
   createdAt: string;
   updatedAt: string;
-  _count?: { instances: number; evaluations: number };
+  instances?: AlertInstance[];
+  evaluations?: AlertEvaluation[];
+  deliveries?: NotificationDelivery[];
+  _count?: { instances: number; evaluations: number; deliveries?: number };
 }
 
 export interface AlertEvaluation {
@@ -339,8 +356,9 @@ export interface DashboardDataResponse {
   };
   widgets: DashboardWidget[];
 }
-
-const API_BASE = '/api/v1';
+const API_BASE = import.meta.env.VITE_API_URL
+  ? `${String(import.meta.env.VITE_API_URL).replace(/\/+$/, '')}/api/v1`
+  : '/api/v1';
 
 async function fetchJson<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -365,6 +383,16 @@ async function fetchJson<T>(path: string, options: RequestInit = {}): Promise<T>
 
 export const api = {
   getProjects: () => fetchJson<Project[]>('/projects'),
+  getProject: (id: string) => fetchJson<Project>(`/projects/${id}`),
+  createProject: (data: { name: string; description?: string }) =>
+    fetchJson<Project>('/projects', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  deleteProject: (id: string) =>
+    fetchJson<{ success: boolean }>(`/projects/${id}`, {
+      method: 'DELETE',
+    }),
   getApis: (projectId?: string) =>
     fetchJson<Api[]>(`/apis${projectId ? `?projectId=${projectId}` : ''}`),
   getApi: (id: string) => fetchJson<Api>(`/apis/${id}`),
@@ -680,6 +708,15 @@ export const api = {
     }>(`/alert-rules/${id}/test`, {
       method: 'POST',
     }),
+  getAlertRuleEvaluations: (id: string, limit = 50) =>
+    fetchJson<AlertEvaluation[]>(`/alert-rules/${id}/evaluations?limit=${limit}`),
+  getAlertRuleDeliveries: (id: string, limit = 50) =>
+    fetchJson<NotificationDelivery[]>(`/alert-rules/${id}/deliveries?limit=${limit}`),
+  sendAlertRuleTestEmail: (data: { recipients: string[]; ruleName?: string; ruleId?: string }) =>
+    fetchJson<{ success: boolean; message: string; recipients: string[] }>('/alert-rules/test-email', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 
   // Alert Instances APIs (Section 20)
   getAlerts: (query?: {
@@ -718,4 +755,563 @@ export const api = {
   },
   getAlertInstance: (id: string) => fetchJson<AlertInstance>(`/alerts/${id}`),
   getAlertEvaluations: (id: string) => fetchJson<AlertEvaluation[]>(`/alerts/${id}/evaluations`),
+
+  // -------------------------------------------------------------
+  // Phase 6: Notification & Alert Routing APIs
+  // -------------------------------------------------------------
+  getContactPoints: () => fetchJson<ContactPoint[]>('/contact-points'),
+  getContactPoint: (id: string) => fetchJson<ContactPoint>(`/contact-points/${id}`),
+  createContactPoint: (data: {
+    name: string;
+    type: ContactPointType;
+    configuration: Record<string, any>;
+    isEnabled?: boolean;
+  }) =>
+    fetchJson<ContactPoint>('/contact-points', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateContactPoint: (id: string, data: Partial<ContactPoint>) =>
+    fetchJson<ContactPoint>(`/contact-points/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteContactPoint: (id: string) =>
+    fetchJson<void>(`/contact-points/${id}`, { method: 'DELETE' }),
+  testContactPoint: (id: string) =>
+    fetchJson<{ success: boolean; statusMessage: string; statusCode?: number; details?: any }>(
+      `/contact-points/${id}/test`,
+      { method: 'POST' },
+    ),
+
+  getNotificationPolicies: () => fetchJson<NotificationPolicy[]>('/notification-policies'),
+  getNotificationPolicy: (id: string) =>
+    fetchJson<NotificationPolicy>(`/notification-policies/${id}`),
+  createNotificationPolicy: (data: {
+    name: string;
+    description?: string;
+    isEnabled?: boolean;
+    priority?: number;
+    matchers?: LabelMatcher[];
+    contactPointIds: string[];
+    notifyOnFiring?: boolean;
+    notifyOnRecovery?: boolean;
+    repeatInterval?: number;
+  }) =>
+    fetchJson<NotificationPolicy>('/notification-policies', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateNotificationPolicy: (id: string, data: Partial<NotificationPolicy>) =>
+    fetchJson<NotificationPolicy>(`/notification-policies/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteNotificationPolicy: (id: string) =>
+    fetchJson<void>(`/notification-policies/${id}`, { method: 'DELETE' }),
+  previewNotificationPolicy: (matchers: LabelMatcher[], sampleLabels: Record<string, string>) =>
+    fetchJson<{ matched: boolean; breakdown: any[] }>('/notification-policies/preview', {
+      method: 'POST',
+      body: JSON.stringify({ matchers, sampleLabels }),
+    }),
+
+  getNotificationDeliveries: (query?: {
+    status?: NotificationDeliveryStatus;
+    eventType?: NotificationEventType;
+    incidentId?: string;
+    contactPointId?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (query?.status) params.set('status', query.status);
+    if (query?.eventType) params.set('eventType', query.eventType);
+    if (query?.incidentId) params.set('incidentId', query.incidentId);
+    if (query?.contactPointId) params.set('contactPointId', query.contactPointId);
+    if (query?.limit) params.set('limit', String(query.limit));
+    if (query?.offset) params.set('offset', String(query.offset));
+    const qs = params.toString();
+    return fetchJson<{
+      items: NotificationDelivery[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/notification-deliveries${qs ? `?${qs}` : ''}`);
+  },
+  getNotificationDelivery: (id: string) =>
+    fetchJson<NotificationDelivery>(`/notification-deliveries/${id}`),
+  getIncidentNotifications: (incidentId: string) =>
+    fetchJson<NotificationDelivery[]>(`/incidents/${incidentId}/notifications`),
+
+  getNotificationSilences: () => fetchJson<NotificationSilence[]>('/notification-silences'),
+  createNotificationSilence: (data: {
+    matchers: LabelMatcher[];
+    startsAt: string;
+    endsAt: string;
+    reason?: string;
+  }) =>
+    fetchJson<NotificationSilence>('/notification-silences', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  deleteNotificationSilence: (id: string) =>
+    fetchJson<void>(`/notification-silences/${id}`, { method: 'DELETE' }),
+
+  // -------------------------------------------------------------
+  // Load Testing API Client Methods
+  // -------------------------------------------------------------
+  getLoadTests: (query?: {
+    projectId?: string;
+    apiId?: string;
+    environmentId?: string;
+    status?: LoadTestStatus;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (query?.projectId) params.set('projectId', query.projectId);
+    if (query?.apiId) params.set('apiId', query.apiId);
+    if (query?.environmentId) params.set('environmentId', query.environmentId);
+    if (query?.status) params.set('status', query.status);
+    if (query?.search) params.set('search', query.search);
+    if (query?.limit) params.set('limit', String(query.limit));
+    if (query?.offset) params.set('offset', String(query.offset));
+    const qs = params.toString();
+    return fetchJson<{
+      items: LoadTest[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/load-tests${qs ? `?${qs}` : ''}`);
+  },
+  getLoadTest: (id: string) => fetchJson<LoadTest>(`/load-tests/${id}`),
+  createLoadTest: (payload: CreateLoadTestPayload) =>
+    fetchJson<{ id: string; name: string; status: LoadTestStatus }>('/load-tests', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  cancelLoadTest: (id: string) =>
+    fetchJson<{ message: string; status: LoadTestStatus }>(`/load-tests/${id}/cancel`, {
+      method: 'POST',
+    }),
+  deleteLoadTest: (id: string) =>
+    fetchJson<{ message: string }>(`/load-tests/${id}`, { method: 'DELETE' }),
+
+  // -------------------------------------------------------------
+  // API Tester & Postman-like Client
+  // -------------------------------------------------------------
+  executeRequest: (payload: ExecuteRequestPayload, signal?: AbortSignal) =>
+    fetchJson<ApiExecutionResult>('/api-tester/execute', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      signal,
+    }),
+  getTesterHistory: (projectId?: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (projectId) params.set('projectId', projectId);
+    if (limit) params.set('limit', String(limit));
+    const qs = params.toString();
+    return fetchJson<ApiRequestHistory[]>(`/api-tester/history${qs ? `?${qs}` : ''}`);
+  },
+  clearTesterHistory: (projectId?: string) => {
+    const params = new URLSearchParams();
+    if (projectId) params.set('projectId', projectId);
+    const qs = params.toString();
+    return fetchJson<{ count: number; message: string }>(`/api-tester/history${qs ? `?${qs}` : ''}`, {
+      method: 'DELETE',
+    });
+  },
+  getCollections: (projectId: string) =>
+    fetchJson<ApiCollection[]>(`/api-tester/collections?projectId=${projectId}`),
+  createCollection: (data: { projectId: string; name: string; description?: string }) =>
+    fetchJson<ApiCollection>('/api-tester/collections', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateCollection: (id: string, data: { name?: string; description?: string }) =>
+    fetchJson<ApiCollection>(`/api-tester/collections/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteCollection: (id: string) =>
+    fetchJson<{ message: string }>(`/api-tester/collections/${id}`, { method: 'DELETE' }),
+  saveTesterRequest: (data: any) =>
+    fetchJson<SavedApiRequest>('/api-tester/requests', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getSavedTesterRequest: (id: string) =>
+    fetchJson<SavedApiRequest>(`/api-tester/requests/${id}`),
+  updateSavedTesterRequest: (id: string, data: any) =>
+    fetchJson<SavedApiRequest>(`/api-tester/requests/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteSavedTesterRequest: (id: string) =>
+    fetchJson<{ message: string }>(`/api-tester/requests/${id}`, { method: 'DELETE' }),
 };
+
+// -------------------------------------------------------------
+// Phase 6 Notification Interfaces
+// -------------------------------------------------------------
+
+export type ContactPointType = 'EMAIL' | 'SLACK' | 'WEBHOOK';
+export type NotificationDeliveryStatus = 'PENDING' | 'SENDING' | 'SENT' | 'FAILED' | 'CANCELLED';
+export type NotificationEventType = 'FIRING' | 'RECOVERY' | 'REPEAT' | 'TEST';
+
+export interface ContactPoint {
+  id: string;
+  organizationId: string;
+  name: string;
+  type: ContactPointType;
+  configuration: Record<string, any>;
+  isEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  _count?: {
+    deliveries: number;
+  };
+}
+
+export interface LabelMatcher {
+  label: string;
+  operator: '=' | '!=' | 'contains' | 'regex' | 'in';
+  value: string;
+}
+
+export interface NotificationPolicy {
+  id: string;
+  organizationId: string;
+  name: string;
+  description?: string;
+  isEnabled: boolean;
+  priority: number;
+  matchers: LabelMatcher[];
+  contactPointIds: string[];
+  notifyOnFiring: boolean;
+  notifyOnRecovery: boolean;
+  repeatInterval: number;
+  createdAt: string;
+  updatedAt: string;
+  contactPoints?: Array<{ id: string; name: string; type: ContactPointType; isEnabled: boolean }>;
+  _count?: {
+    deliveries: number;
+  };
+}
+
+export interface NotificationDelivery {
+  id: string;
+  organizationId: string;
+  incidentId?: string;
+  alertInstanceId?: string;
+  alertRuleId?: string;
+  recipient?: string;
+  channel?: ContactPointType;
+  contactPointId?: string;
+  contactPoint?: {
+    id: string;
+    name: string;
+    type: ContactPointType;
+    isEnabled?: boolean;
+    configuration?: Record<string, any>;
+  };
+  policyId?: string;
+  policy?: {
+    id: string;
+    name: string;
+    priority?: number;
+  };
+  incident?: {
+    id: string;
+    title: string;
+    severity: string;
+    status: string;
+    startedAt: string;
+  };
+  eventType: NotificationEventType;
+  status: NotificationDeliveryStatus;
+  attemptCount: number;
+  lastAttemptAt?: string;
+  nextRetryAt?: string;
+  errorMessage?: string;
+  deduplicationKey: string;
+  payload?: any;
+  sentAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NotificationSilence {
+  id: string;
+  organizationId: string;
+  createdBy?: string;
+  matchers: LabelMatcher[];
+  startsAt: string;
+  endsAt: string;
+  reason?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// -------------------------------------------------------------
+// Load Testing Interfaces
+// -------------------------------------------------------------
+
+export type LoadTestStatus = 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+export type LoadTestMode = 'DURATION' | 'REQUEST_COUNT';
+
+export interface LoadTestResult {
+  id: string;
+  loadTestId: string;
+  totalRequests: number;
+  successfulRequests: number;
+  failedRequests: number;
+  requestsPerSecond: number;
+  actualDurationSeconds: number;
+  avgLatency: number;
+  minLatency: number;
+  maxLatency: number;
+  p50Latency: number;
+  p90Latency: number;
+  p95Latency: number;
+  p99Latency: number;
+  errorRate: number;
+  timeoutCount: number;
+  connectionErrors: number;
+  statusCodeCounts: Record<string, number>;
+  errorBreakdown: {
+    http_4xx: number;
+    http_5xx: number;
+    timeouts: number;
+    connection_errors: number;
+  };
+  createdAt: string;
+}
+
+export interface LoadTestSample {
+  id: string;
+  loadTestId: string;
+  timestamp: string;
+  relativeSeconds: number;
+  requestsPerSecond: number;
+  activeUsers: number;
+  avgLatency: number;
+  p50Latency?: number | null;
+  p95Latency: number;
+  p99Latency?: number | null;
+  errorRate: number;
+  totalRequestsSoFar?: number | null;
+  successCount?: number | null;
+  failureCount?: number | null;
+}
+
+export interface LoadTest {
+  id: string;
+  name: string;
+  description?: string | null;
+  projectId: string;
+  project?: { id: string; name: string };
+  apiId?: string | null;
+  api?: { id: string; name: string };
+  environmentId?: string | null;
+  environment?: { id: string; name: string; baseUrl?: string | null };
+  createdBy?: string | null;
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  url: string;
+  headers?: Record<string, string>;
+  queryParams?: Record<string, string>;
+  body?: string | null;
+  authentication?: {
+    type: 'none' | 'bearer' | 'basic' | 'apiKey';
+    token?: string;
+    username?: string;
+    password?: string;
+    key?: string;
+    value?: string;
+    addTo?: 'header' | 'query';
+  };
+  virtualUsers: number;
+  duration?: number | null;
+  requestCount?: number | null;
+  mode: LoadTestMode;
+  timeout: number;
+  status: LoadTestStatus;
+  errorMessage?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  result?: LoadTestResult | null;
+  samples?: LoadTestSample[];
+  liveProgress?: {
+    elapsedSeconds: number;
+    currentRequests: number;
+    currentRps: number;
+    currentP95: number;
+    currentErrorRate: number;
+    activeUsers: number;
+  } | null;
+}
+
+export interface CreateLoadTestPayload {
+  name: string;
+  description?: string;
+  projectId: string;
+  apiId?: string;
+  environmentId?: string;
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  url: string;
+  headers?: Record<string, string>;
+  queryParams?: Record<string, string>;
+  body?: string;
+  authentication?: Record<string, any>;
+  virtualUsers?: number;
+  mode?: LoadTestMode;
+  duration?: number;
+  requestCount?: number;
+  timeout?: number;
+}
+
+// -------------------------------------------------------------
+// API Tester Interfaces
+// -------------------------------------------------------------
+export type ApiTesterAuthType = 'none' | 'bearer' | 'basic' | 'apiKey';
+
+export interface ApiTesterAuth {
+  type: ApiTesterAuthType;
+  token?: string;
+  username?: string;
+  password?: string;
+  apiKeyName?: string;
+  apiKeyValue?: string;
+  apiKeyPlacement?: 'header' | 'query';
+}
+
+export type ApiTesterBodyType = 'none' | 'json' | 'raw' | 'x-www-form-urlencoded' | 'form-data';
+
+export type ApiAssertionType =
+  | 'status_code_equals'
+  | 'response_time_less_than'
+  | 'response_contains_text'
+  | 'json_property_exists'
+  | 'json_property_equals';
+
+export interface ApiTesterAssertion {
+  id?: string;
+  name?: string;
+  type: ApiAssertionType;
+  target?: string;
+  expected?: any;
+  enabled?: boolean;
+}
+
+export interface ApiAssertionResult {
+  name: string;
+  passed: boolean;
+  type: ApiAssertionType;
+  expected?: any;
+  actual?: any;
+  error?: string;
+}
+
+export interface ApiTimingBreakdown {
+  totalMs: number;
+  dnsMs?: number;
+  tcpMs?: number;
+  tlsMs?: number;
+  ttfbMs?: number;
+  downloadMs?: number;
+}
+
+export interface ApiExecutionResult {
+  status: number | null;
+  statusText: string | null;
+  headers: Record<string, string>;
+  cookies: Array<{ name: string; value: string; [key: string]: any }>;
+  body: any;
+  rawBody: string;
+  contentType: string;
+  size: number;
+  durationMs: number;
+  timing: ApiTimingBreakdown;
+  testResults: ApiAssertionResult[];
+  testsSummary: {
+    total: number;
+    passed: number;
+    failed: number;
+  };
+  error?: string;
+  finalUrl: string;
+}
+
+export interface ExecuteRequestPayload {
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
+  url: string;
+  queryParams?: Record<string, string | number | boolean>;
+  headers?: Record<string, string>;
+  body?: string;
+  bodyType?: ApiTesterBodyType;
+  auth?: ApiTesterAuth;
+  timeout?: number;
+  variables?: Record<string, string>;
+  tests?: ApiTesterAssertion[];
+  projectId?: string;
+  apiId?: string;
+  environmentId?: string;
+  saveToHistory?: boolean;
+}
+
+export interface ApiCollection {
+  id: string;
+  projectId: string;
+  name: string;
+  description?: string | null;
+  requests?: SavedApiRequest[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SavedApiRequest {
+  id: string;
+  collectionId?: string | null;
+  projectId: string;
+  apiId?: string | null;
+  environmentId?: string | null;
+  name: string;
+  description?: string | null;
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
+  url: string;
+  headers: Record<string, string>;
+  queryParams: Record<string, any>;
+  body?: string | null;
+  bodyType: string;
+  auth: any;
+  tests: any[];
+  timeout: number;
+  createdAt: string;
+  updatedAt: string;
+  collection?: ApiCollection;
+  api?: { id: string; name: string };
+  environment?: { id: string; name: string; baseUrl?: string };
+}
+
+export interface ApiRequestHistory {
+  id: string;
+  projectId?: string | null;
+  apiId?: string | null;
+  environmentId?: string | null;
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
+  url: string;
+  status?: number | null;
+  statusText?: string | null;
+  durationMs?: number | null;
+  sizeBytes?: number | null;
+  error?: string | null;
+  requestSummary?: any;
+  createdAt: string;
+  project?: { id: string; name: string };
+  api?: { id: string; name: string };
+  environment?: { id: string; name: string; baseUrl?: string };
+}
+

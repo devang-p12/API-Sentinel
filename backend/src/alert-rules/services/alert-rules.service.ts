@@ -67,6 +67,10 @@ export class AlertRulesService {
       }
     }
 
+    if (dto.notificationConfig) {
+      this.validateNotificationConfig(dto.notificationConfig);
+    }
+
     return this.prisma.alertRule.create({
       data: {
         name: dto.name.trim(),
@@ -82,6 +86,7 @@ export class AlertRulesService {
         evaluationInterval: dto.evaluationInterval ?? 60,
         severity: dto.severity ?? 'WARNING',
         labels: dto.labels ?? {},
+        notificationConfig: dto.notificationConfig ?? {},
         enabled: dto.enabled ?? true,
         createdBy: dto.createdBy,
       },
@@ -117,10 +122,48 @@ export class AlertRulesService {
         api: { select: { id: true, name: true } },
         environment: { select: { id: true, name: true } },
         monitor: { select: { id: true, name: true } },
+        instances: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            status: true,
+            currentValue: true,
+            threshold: true,
+            lastEvaluatedAt: true,
+            startedAt: true,
+            pendingSince: true,
+          },
+        },
+        evaluations: {
+          orderBy: { evaluatedAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            value: true,
+            conditionMet: true,
+            stateBefore: true,
+            stateAfter: true,
+            evaluatedAt: true,
+          },
+        },
+        deliveries: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            status: true,
+            sentAt: true,
+            createdAt: true,
+            recipient: true,
+            eventType: true,
+          },
+        },
         _count: {
           select: {
             instances: true,
             evaluations: true,
+            deliveries: true,
           },
         },
       },
@@ -137,8 +180,29 @@ export class AlertRulesService {
         environment: true,
         monitor: true,
         instances: {
+          include: {
+            incidentAlerts: {
+              include: {
+                incident: {
+                  include: {
+                    project: { select: { id: true, name: true } },
+                    api: { select: { id: true, name: true } },
+                    environment: { select: { id: true, name: true } },
+                  },
+                },
+              },
+            },
+          },
           orderBy: { createdAt: 'desc' },
-          take: 10,
+          take: 20,
+        },
+        evaluations: {
+          orderBy: { evaluatedAt: 'desc' },
+          take: 50,
+        },
+        deliveries: {
+          orderBy: { createdAt: 'desc' },
+          take: 50,
         },
       },
     });
@@ -154,6 +218,14 @@ export class AlertRulesService {
     return rule;
   }
 
+  async findEvaluations(ruleId: string, limit = 50) {
+    return this.prisma.alertEvaluation.findMany({
+      where: { alertRuleId: ruleId },
+      orderBy: { evaluatedAt: 'desc' },
+      take: Math.min(limit, 100),
+    });
+  }
+
   async update(id: string, dto: UpdateAlertRuleDto, organizationId?: string) {
     const existing = await this.findOne(id, organizationId);
 
@@ -162,11 +234,16 @@ export class AlertRulesService {
       if (!def) throw new BadRequestException(`Unsupported metric: "${dto.metric}"`);
     }
 
+    if (dto.notificationConfig !== undefined) {
+      this.validateNotificationConfig(dto.notificationConfig);
+    }
+
     return this.prisma.alertRule.update({
       where: { id: existing.id },
       data: {
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
         ...(dto.description !== undefined ? { description: dto.description?.trim() } : {}),
+        ...(dto.projectId !== undefined ? { projectId: dto.projectId } : {}),
         ...(dto.metric !== undefined ? { metric: dto.metric } : {}),
         ...(dto.apiId !== undefined ? { apiId: dto.apiId } : {}),
         ...(dto.environmentId !== undefined ? { environmentId: dto.environmentId } : {}),
@@ -177,6 +254,7 @@ export class AlertRulesService {
         ...(dto.evaluationInterval !== undefined ? { evaluationInterval: dto.evaluationInterval } : {}),
         ...(dto.severity !== undefined ? { severity: dto.severity } : {}),
         ...(dto.labels !== undefined ? { labels: dto.labels } : {}),
+        ...(dto.notificationConfig !== undefined ? { notificationConfig: dto.notificationConfig } : {}),
         ...(dto.enabled !== undefined ? { enabled: dto.enabled } : {}),
       },
       include: {
@@ -186,6 +264,35 @@ export class AlertRulesService {
         monitor: true,
       },
     });
+  }
+
+  private validateNotificationConfig(config?: Record<string, any>) {
+    if (!config || !config.email) return;
+    const email = config.email;
+    if (email.enabled) {
+      if (!Array.isArray(email.recipients) || email.recipients.length === 0) {
+        throw new BadRequestException('Add at least one email recipient.');
+      }
+
+      const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+      const seen = new Set<string>();
+
+      for (const r of email.recipients) {
+        const trimmed = typeof r === 'string' ? r.trim() : '';
+        if (!trimmed || !emailRegex.test(trimmed)) {
+          throw new BadRequestException(`Invalid email recipient: "${r}"`);
+        }
+        const lower = trimmed.toLowerCase();
+        if (seen.has(lower)) {
+          throw new BadRequestException(`Duplicate email recipient: "${r}"`);
+        }
+        seen.add(lower);
+      }
+
+      if (email.onFiring === false && email.onResolved === false) {
+        throw new BadRequestException('At least one notification event (Alert fires or Alert resolves) must be selected.');
+      }
+    }
   }
 
   async delete(id: string, organizationId?: string) {

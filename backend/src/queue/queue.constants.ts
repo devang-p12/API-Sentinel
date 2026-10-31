@@ -3,3 +3,7 @@ export const REDIS_CONNECTION = 'REDIS_CONNECTION';
 export const MONITOR_BULL_QUEUE = 'MONITOR_BULL_QUEUE';
 export const ALERT_EVALUATION_QUEUE = 'alert-evaluation-queue';
 export const ALERT_BULL_QUEUE = 'ALERT_BULL_QUEUE';
+export const NOTIFICATION_QUEUE = 'notification-delivery-queue';
+export const NOTIFICATION_BULL_QUEUE = 'NOTIFICATION_BULL_QUEUE';
+export const LOAD_TEST_QUEUE = 'load-test-queue';
+export const LOAD_TEST_BULL_QUEUE = 'LOAD_TEST_BULL_QUEUE';

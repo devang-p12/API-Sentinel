@@ -11,6 +11,8 @@ import {
   Settings01Icon,
   SidebarLeft01Icon,
   SidebarRight01Icon,
+  FlashIcon,
+  PlayIcon,
 } from "@hugeicons/core-free-icons"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -32,9 +34,11 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { name: "Overview", to: "/dashboard", icon: DashboardSquare01Icon },
   { name: "APIs", to: "/apis", icon: ApiIcon },
+  { name: "API Tester", to: "/api-tester", icon: PlayIcon },
   { name: "Monitors", to: "/monitors", icon: Activity01Icon },
+  { name: "Load Tests", to: "/load-tests", icon: FlashIcon },
   { name: "Incidents", to: "/incidents", icon: AlertCircleIcon },
-  { name: "Alerts", to: "/alerts", icon: Notification01Icon },
+  { name: "Alert Rules", to: "/alert-rules", icon: Notification01Icon },
   { name: "Dashboards", to: "/dashboards", icon: ChartLineData01Icon },
   { name: "Settings", to: "/settings", icon: Settings01Icon },
 ]

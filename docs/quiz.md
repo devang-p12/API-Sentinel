@@ -828,3 +828,71 @@ Review and verification of production incident correlation, multi-alert grouping
       ```
     - The first worker acquires the lock, checks for an active incident, and creates it if absent. The second worker waits for the first transaction to commit, then acquires the lock and finds the newly created incident, attaching its alert cleanly without duplicate incident creation.
 
+---
+
+## QUIZ-013 — Notification & Alert Routing (Phase 6)
+
+**Feature:**
+Notification Routing Engine, Contact Points, Policy Matching, Secret Encryption, and BullMQ Delivery Worker
+
+**Date:**
+2026-10-26
+
+**Status:**
+Active / Verified
+
+### Concepts
+- Decoupled Notification Architecture
+- ContactPoint (Email, Slack, Webhook)
+- NotificationPolicy & Label Matchers
+- Incident-Level Notification Grouping
+- Secret Encryption at Rest (AES-256-GCM)
+- Secret Masking in APIs and UI
+- SSRF Mitigation via WebhookSecurityService
+- Deterministic Deduplication Keys
+- Staged Retries in BullMQ Worker
+- Maintenance Silences (NotificationSilence)
+
+### Questions & Comprehensive Answers
+
+1. **Why must the notification routing system be decoupled from the alert evaluation engine?**
+   - The alert evaluation engine has one job: discover metric threshold violations and transition state (`NORMAL -> PENDING -> FIRING -> RESOLVED`).
+   - Coupling notification dispatch directly into the evaluation loop would stall metric evaluation whenever external webhook endpoints (Slack, email, HTTP) are slow or unreachable.
+   - Decoupling notification routing allows notification policies to decide **WHO** gets notified, **WHERE** it is sent, **WHEN** to repeat, and **HOW** to retry without risking monitoring worker starvation.
+
+2. **Why are notifications sent at the Incident level rather than for every raw alert?**
+   - When a service fails, multiple alerts fire simultaneously (e.g. latency, error rate, availability).
+   - If each alert sent its own notification, engineers would receive 3-4 separate messages per minute for the same incident, creating notification fatigue.
+   - Notifying at the Incident level aggregates all active alerts into a single unified summary ("Incident opened: Payment Service Production Degradation with 2 triggered alerts").
+
+3. **How does Sentinel secure sensitive credentials (Slack webhooks, auth tokens) in Contact Points?**
+   - **Encryption at rest**: The `SecretEncryptionService` encrypts sensitive fields (`webhookUrl`, `token`, `password`, `Authorization` headers) using AES-256-GCM before writing to PostgreSQL.
+   - **API Masking**: GET APIs and the frontend receive masked strings (e.g. `https://hooks.slack.com/services/••••••••` and `••••••••`), ensuring raw secrets never leak in the browser or HTTP payloads.
+
+4. **What SSRF risks do generic webhooks introduce, and how does Sentinel defend against them?**
+   - Outbound HTTP requests to user-configured webhooks could allow attackers to probe internal services (e.g. `localhost`, `127.0.0.1`, `169.254.169.254` AWS metadata).
+   - `WebhookSecurityService` enforces protocol allowlisting (`http:`, `https:`), rejects private/reserved IP blocks, applies a strict 5000ms timeout via `AbortController`, and sanitizes error responses.
+
+5. **How does Sentinel guarantee deduplication so that multiple matching policies do not flood contact points?**
+   - When multiple policies match an incident, Sentinel tracks processed contact points in a `Set<string>` and deduplicates them.
+   - A deterministic deduplication key is generated (`inc_${incidentId}_pol_${policyId}_cp_${contactPointId}_${eventType}`).
+   - Transactions acquire an advisory lock on the key, and a database unique constraint ensures identical deliveries are never created twice.
+
+6. **What is the retry schedule for failed notification deliveries?**
+   - Deliveries that fail with retryable errors (5xx server errors, 429 rate limits, network timeouts) are retried in stages:
+     - Attempt 1: Immediate
+     - Attempt 2: 30 seconds
+     - Attempt 3: 2 minutes
+     - Attempt 4: 10 minutes
+   - Non-retryable errors (e.g. 400 Bad Request) fail immediately without wasteful retries.
+
+7. **What is the role of Maintenance Silences (`NotificationSilence`)?**
+   - Silences allow teams to suppress notification dispatch during scheduled maintenance without disabling alert rules. Probes and incident metrics continue tracking in PostgreSQL, but notification routing skips matching alerts while the silence window is active.
+
+8. **How does the frontend integrate notification visibility?**
+   - `/contact-points`: Dedicated UI to manage Email, Slack, and Webhook destinations with secret masking and instant test dispatch.
+   - `/notification-policies`: Visual rule builder with label matchers, priorities, and a live matching simulation preview.
+   - `/notification-history`: Real-time audit log of all deliveries with status, event types, and attempt counts.
+   - `IncidentDetailSheet`: Integrated "Notifications Dispatched" section showing exact delivery status for each channel on that incident.
+
+

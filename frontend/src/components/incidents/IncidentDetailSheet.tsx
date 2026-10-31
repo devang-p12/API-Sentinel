@@ -4,6 +4,7 @@ import {
   type Incident,
   type IncidentEvent,
   type AlertInstance,
+  type NotificationDelivery,
 } from '@/lib/api';
 import {
   Sheet,
@@ -42,6 +43,7 @@ export function IncidentDetailSheet({
   const [incident, setIncident] = useState<Incident | null>(null);
   const [timeline, setTimeline] = useState<IncidentEvent[]>([]);
   const [alerts, setAlerts] = useState<AlertInstance[]>([]);
+  const [notifications, setNotifications] = useState<NotificationDelivery[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isActionLoading, setIsActionLoading] = useState<boolean>(false);
 
@@ -54,14 +56,16 @@ export function IncidentDetailSheet({
   const loadIncidentDetails = async (id: string) => {
     setIsLoading(true);
     try {
-      const [incData, timelineData, alertsData] = await Promise.all([
+      const [incData, timelineData, alertsData, notifsData] = await Promise.all([
         api.getIncident(id),
         api.getIncidentTimeline(id).catch(() => []),
         api.getIncidentAlerts(id).catch(() => []),
+        api.getIncidentNotifications(id).catch(() => []),
       ]);
       setIncident(incData);
       setTimeline(timelineData || []);
       setAlerts(alertsData || []);
+      setNotifications(notifsData || []);
     } catch (err) {
       console.error('Failed to load incident details:', err);
     } finally {
@@ -348,6 +352,84 @@ export function IncidentDetailSheet({
                       <div className="flex items-center gap-1 text-[11px] text-muted-foreground group-hover:text-primary">
                         <span>Inspect</span>
                         <HugeiconsIcon icon={ArrowRight01Icon} className="size-3.5" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Notifications Dispatched Section (Phase 6, Section 27) */}
+            <div className="space-y-2 pt-2 border-t border-border">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <span>🔔</span>
+                  <span>Notifications Dispatched ({notifications.length})</span>
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  Multi-channel alert routing
+                </span>
+              </div>
+              {notifications.length === 0 ? (
+                <div className="p-3 text-center border border-dashed border-border rounded text-muted-foreground text-xs">
+                  No notifications routed for this incident yet.
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {notifications.map((n) => (
+                    <div
+                      key={n.id}
+                      className="p-2.5 rounded bg-muted/20 border border-border flex items-center justify-between gap-2 text-xs"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-foreground">
+                            {n.contactPoint?.name || 'Contact Point'}
+                          </span>
+                          <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 h-4">
+                            {n.contactPoint?.type || 'WEBHOOK'}
+                          </Badge>
+                          <Badge
+                            variant="secondary"
+                            className={`text-[9px] px-1.5 py-0 h-4 ${
+                              n.eventType === 'FIRING'
+                                ? 'bg-red-500/10 text-red-400'
+                                : 'bg-emerald-500/10 text-emerald-400'
+                            }`}
+                          >
+                            {n.eventType}
+                          </Badge>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground font-mono">
+                          Policy: {n.policy?.name || 'Default'} • {new Date(n.createdAt).toLocaleTimeString()}
+                        </div>
+                        {n.errorMessage && (
+                          <div className="text-[10px] text-destructive font-mono truncate max-w-sm">
+                            {n.errorMessage}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="shrink-0">
+                        {n.status === 'SENT' ? (
+                          <span className="text-emerald-400 font-semibold flex items-center gap-1 text-[11px]">
+                            <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-3.5" />
+                            SENT
+                          </span>
+                        ) : n.status === 'PENDING' ? (
+                          <span className="text-amber-400 font-semibold flex items-center gap-1 text-[11px]">
+                            <HugeiconsIcon icon={Clock01Icon} className="size-3.5" />
+                            RETRYING ({n.attemptCount})
+                          </span>
+                        ) : n.status === 'SENDING' ? (
+                          <span className="text-sky-400 font-semibold flex items-center gap-1 text-[11px]">
+                            <span className="animate-spin text-xs">⟳</span> SENDING
+                          </span>
+                        ) : (
+                          <span className="text-destructive font-semibold flex items-center gap-1 text-[11px]">
+                            FAILED
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))}

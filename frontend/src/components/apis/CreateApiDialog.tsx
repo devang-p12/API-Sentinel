@@ -1,5 +1,5 @@
 import { useState, useEffect, type FormEvent } from "react"
-import type { Project } from "@/lib/api"
+import { api, type Project } from "@/lib/api"
 import {
   Dialog,
   DialogContent,
@@ -11,12 +11,15 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { Add01Icon, ArrowLeft01Icon } from "@hugeicons/core-free-icons"
 
 interface CreateApiDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   projects: Project[]
   onCreate: (data: { name: string; description?: string; projectId: string }) => Promise<void>
+  onProjectCreated?: (project: Project) => void
 }
 
 export function CreateApiDialog({
@@ -24,19 +27,31 @@ export function CreateApiDialog({
   onOpenChange,
   projects,
   onCreate,
+  onProjectCreated,
 }: CreateApiDialogProps) {
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [projectId, setProjectId] = useState(projects[0]?.id || "")
+  const [isNewProjectMode, setIsNewProjectMode] = useState(projects.length === 0)
+  const [newProjectName, setNewProjectName] = useState("")
+  const [newProjectDescription, setNewProjectDescription] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Keep projectId in sync if projects load asynchronously
+  // Sync mode and default projectId if projects change or modal opens
   useEffect(() => {
-    if (projects.length > 0 && !projectId) {
-      setProjectId(projects[0].id)
+    if (open) {
+      if (projects.length === 0) {
+        setIsNewProjectMode(true)
+        setProjectId("")
+      } else {
+        setIsNewProjectMode(false)
+        if (!projectId || !projects.some((p) => p.id === projectId)) {
+          setProjectId(projects[0].id)
+        }
+      }
     }
-  }, [projects, projectId])
+  }, [open, projects])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -44,22 +59,46 @@ export function CreateApiDialog({
       setError("API Name is required.")
       return
     }
-    if (!projectId) {
-      setError("Please select a target Project.")
-      return
+
+    let targetProjectId = projectId
+
+    if (isNewProjectMode) {
+      if (!newProjectName.trim()) {
+        setError("Project Name is required to create a new project.")
+        return
+      }
+    } else {
+      if (!targetProjectId) {
+        setError("Please select a target Project.")
+        return
+      }
     }
 
     setIsSubmitting(true)
     setError(null)
 
     try {
+      if (isNewProjectMode) {
+        const createdProject = await api.createProject({
+          name: newProjectName.trim(),
+          description: newProjectDescription.trim() || undefined,
+        })
+        targetProjectId = createdProject.id
+        if (onProjectCreated) {
+          onProjectCreated(createdProject)
+        }
+      }
+
       await onCreate({
         name: name.trim(),
         description: description.trim() || undefined,
-        projectId,
+        projectId: targetProjectId,
       })
+
       setName("")
       setDescription("")
+      setNewProjectName("")
+      setNewProjectDescription("")
       onOpenChange(false)
     } catch (err: any) {
       setError(err?.message || "Failed to register API. Check backend connectivity.")
@@ -90,6 +129,7 @@ export function CreateApiDialog({
             </div>
           )}
 
+          {/* Service Info */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-foreground">
               API Name <span className="text-destructive">*</span>
@@ -118,11 +158,75 @@ export function CreateApiDialog({
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-foreground">
-              Target Project <span className="text-destructive">*</span>
-            </label>
-            {projects.length > 0 ? (
+          {/* Target Project Section */}
+          <div className="space-y-2 border-t border-border/70 pt-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-foreground">
+                Target Project <span className="text-destructive">*</span>
+              </label>
+              {projects.length > 0 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="h-6 text-[11px] gap-1 px-1.5 text-primary hover:text-primary"
+                  onClick={() => setIsNewProjectMode(!isNewProjectMode)}
+                  disabled={isSubmitting}
+                >
+                  {isNewProjectMode ? (
+                    <>
+                      <HugeiconsIcon icon={ArrowLeft01Icon} className="size-3" />
+                      Select Existing
+                    </>
+                  ) : (
+                    <>
+                      <HugeiconsIcon icon={Add01Icon} className="size-3" />
+                      New Project
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+
+            {isNewProjectMode ? (
+              <div className="space-y-2.5 p-3 border border-border bg-muted/20">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
+                    Create New Project
+                  </span>
+                  {projects.length === 0 && (
+                    <Badge variant="outline" className="text-[9px]">
+                      Required
+                    </Badge>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] text-muted-foreground">
+                    Project Name <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    placeholder="e.g. Core Platform, Billing Engine"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    disabled={isSubmitting}
+                    className="text-xs h-7"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] text-muted-foreground">Project Description (optional)</label>
+                  <Input
+                    placeholder="e.g. Production microservices workspace"
+                    value={newProjectDescription}
+                    onChange={(e) => setNewProjectDescription(e.target.value)}
+                    disabled={isSubmitting}
+                    className="text-xs h-7"
+                  />
+                </div>
+                <span className="text-[10px] text-muted-foreground block">
+                  This project workspace will be created and linked to your new service.
+                </span>
+              </div>
+            ) : (
               <select
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
@@ -135,11 +239,8 @@ export function CreateApiDialog({
                   </option>
                 ))}
               </select>
-            ) : (
-              <div className="text-xs text-muted-foreground border border-border p-2 bg-muted/20">
-                No active projects found. Sentinel will link to default tenant project.
-              </div>
             )}
+
             <span className="text-[10px] text-muted-foreground block">
               APIs are strictly scoped to a parent Project in Sentinel's relational model.
             </span>
@@ -156,7 +257,7 @@ export function CreateApiDialog({
               Cancel
             </Button>
             <Button type="submit" size="sm" disabled={isSubmitting}>
-              {isSubmitting ? "Registering..." : "Register API"}
+              {isSubmitting ? "Registering..." : isNewProjectMode ? "Create & Register API" : "Register API"}
             </Button>
           </DialogFooter>
         </form>

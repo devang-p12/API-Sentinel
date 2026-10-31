@@ -1,12 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   AlertSeverity,
   AlertState,
   IncidentEventType,
   IncidentStatus,
   ActorType,
+  NotificationEventType,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationRoutingService } from '../notifications/services/notification-routing.service';
 
 const SEVERITY_WEIGHTS: Record<AlertSeverity, number> = {
   [AlertSeverity.INFO]: 0,
@@ -19,7 +21,10 @@ const SEVERITY_WEIGHTS: Record<AlertSeverity, number> = {
 export class IncidentCorrelationService {
   private readonly logger = new Logger(IncidentCorrelationService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly notificationRoutingService?: NotificationRoutingService,
+  ) {}
 
   /**
    * Generates a deterministic correlation key based on project, API, and environment.
@@ -57,7 +62,7 @@ export class IncidentCorrelationService {
     const environmentId = rule.environmentId;
     const correlationKey = this.getCorrelationKey(projectId, apiId, environmentId);
 
-    return this.prisma.$transaction(async (tx) => {
+    const resultingIncidentId = await this.prisma.$transaction(async (tx) => {
       // Concurrency safety (Section 35): advisory lock on deterministic correlation key
       await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', correlationKey);
 
@@ -241,6 +246,22 @@ export class IncidentCorrelationService {
 
       return newIncident.id;
     });
+
+    // Phase 6: Notification Routing for FIRING incidents
+    if (resultingIncidentId && this.notificationRoutingService) {
+      try {
+        await this.notificationRoutingService.routeIncidentNotification(
+          resultingIncidentId,
+          NotificationEventType.FIRING,
+        );
+      } catch (err: any) {
+        this.logger.error(
+          `[NotificationRouting] Failed to route FIRING notification for Incident ${resultingIncidentId}: ${err.message}`,
+        );
+      }
+    }
+
+    return resultingIncidentId;
   }
 
   /**
@@ -348,6 +369,20 @@ export class IncidentCorrelationService {
           this.logger.log(
             `[IncidentEngine] ✅ Automatically resolved Incident ${incidentId} ("${currentIncident.title}") after ${durationSeconds}s`,
           );
+
+          // Phase 6: Notification Routing for RECOVERY
+          if (this.notificationRoutingService) {
+            try {
+              await this.notificationRoutingService.routeIncidentNotification(
+                incidentId,
+                NotificationEventType.RECOVERY,
+              );
+            } catch (err: any) {
+              this.logger.error(
+                `[NotificationRouting] Failed to route RECOVERY notification for Incident ${incidentId}: ${err.message}`,
+              );
+            }
+          }
         } else {
           this.logger.log(
             `[IncidentEngine] Alert "${instance.alertRule.name}" resolved, but Incident ${incidentId} remains ${currentIncident.status} because other alerts are still active`,

@@ -8,6 +8,7 @@ import { AlertRulesService } from './services/alert-rules.service';
 import { AlertInstancesService } from './services/alert-instances.service';
 import { AlertSchedulerService } from './scheduler/alert-scheduler.service';
 import { AlertEvaluationWorker } from './workers/alert-evaluation.worker';
+import { AlertRuleNotificationService } from './services/alert-rule-notification.service';
 import { AlertRulesController } from './alert-rules.controller';
 
 @Module({
@@ -21,6 +22,7 @@ import { AlertRulesController } from './alert-rules.controller';
     AlertInstancesService,
     AlertSchedulerService,
     AlertEvaluationWorker,
+    AlertRuleNotificationService,
   ],
   exports: [
     AlertRulesService,
@@ -29,6 +31,7 @@ import { AlertRulesController } from './alert-rules.controller';
     AlertSchedulerService,
     AlertFingerprintService,
     AlertStateMachineService,
+    AlertRuleNotificationService,
   ],
 })
 export class AlertRulesModule {}

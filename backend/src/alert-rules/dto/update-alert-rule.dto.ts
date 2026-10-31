@@ -20,6 +20,10 @@ export class UpdateAlertRuleDto {
 
   @IsString()
   @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
   metric?: string;
 
   @IsString()
@@ -59,6 +63,10 @@ export class UpdateAlertRuleDto {
   @IsObject()
   @IsOptional()
   labels?: Record<string, any>;
+
+  @IsObject()
+  @IsOptional()
+  notificationConfig?: Record<string, any>;
 
   @IsBoolean()
   @IsOptional()
