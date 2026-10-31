@@ -19,18 +19,25 @@ import {
     {
       provide: REDIS_CONNECTION,
       useFactory: () => {
+        let client: Redis;
         if (process.env.REDIS_URL) {
-          return new Redis(process.env.REDIS_URL, {
+          client = new Redis(process.env.REDIS_URL, {
+            maxRetriesPerRequest: null, // Required by BullMQ
+            enableReadyCheck: false,
+          });
+        } else {
+          const host = process.env.REDIS_HOST || 'localhost';
+          const port = parseInt(process.env.REDIS_PORT || '6380', 10);
+          client = new Redis({
+            host,
+            port,
             maxRetriesPerRequest: null, // Required by BullMQ
           });
         }
-        const host = process.env.REDIS_HOST || 'localhost';
-        const port = parseInt(process.env.REDIS_PORT || '6380', 10);
-        return new Redis({
-          host,
-          port,
-          maxRetriesPerRequest: null, // Required by BullMQ
+        client.on('error', (err) => {
+          console.warn('[Redis] Connection event:', err.message);
         });
+        return client;
       },
     },
     {

@@ -56,5 +56,5 @@ COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 
-# Push DB schema on startup to ensure tables exist, then run NestJS
-CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/main"]
+# Start NestJS directly (instant boot, binds immediately to 0.0.0.0:3000)
+CMD ["node", "dist/main"]
