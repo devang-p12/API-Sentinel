@@ -20,8 +20,14 @@ import {
       provide: REDIS_CONNECTION,
       useFactory: () => {
         let client: Redis;
-        if (process.env.REDIS_URL) {
-          client = new Redis(process.env.REDIS_URL, {
+        let redisUrl = process.env.REDIS_URL ? String(process.env.REDIS_URL).trim() : '';
+        if (redisUrl) {
+          redisUrl = redisUrl.replace(/^["']|["']$/g, '').trim();
+          redisUrl = redisUrl.replace(/^REDIS_URL\s*=\s*/i, '').trim();
+        }
+
+        if (redisUrl && (redisUrl.startsWith('redis://') || redisUrl.startsWith('rediss://'))) {
+          client = new Redis(redisUrl, {
             maxRetriesPerRequest: null, // Required by BullMQ
             enableReadyCheck: false,
           });
