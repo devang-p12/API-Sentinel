@@ -1,6 +1,14 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
+import * as dns from 'node:dns';
+
+// Ensure IPv4 DNS resolution is prioritized across cloud containers (e.g. Render)
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch {
+  // Ignore if unsupported in runtime
+}
 
 async function bootstrap() {
   const logger = new Logger('SentinelBootstrap');
