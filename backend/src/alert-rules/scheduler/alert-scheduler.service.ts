@@ -8,9 +8,12 @@ export class AlertSchedulerService implements OnModuleInit {
 
   constructor(@Inject(ALERT_BULL_QUEUE) private readonly alertQueue: Queue) {}
 
-  async onModuleInit() {
-    // Register global recurring alert evaluation sweep (every 30 seconds)
-    await this.registerGlobalSweep(30);
+  onModuleInit() {
+    // Register global recurring alert evaluation sweep asynchronously in background
+    // to prevent blocking HTTP server port binding
+    this.registerGlobalSweep(30).catch((err) => {
+      this.logger.warn(`Deferred global alert sweep registration: ${err.message}`);
+    });
   }
 
   /**

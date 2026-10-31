@@ -21,9 +21,28 @@ import {
       useFactory: () => {
         let client: Redis;
         let redisUrl = process.env.REDIS_URL ? String(process.env.REDIS_URL).trim() : '';
+
+        // Auto-detect Upstash credentials if REST URL and TOKEN were entered in Render
+        if (
+          !redisUrl &&
+          process.env.UPSTASH_REDIS_REST_URL &&
+          process.env.UPSTASH_REDIS_REST_TOKEN
+        ) {
+          const host = process.env.UPSTASH_REDIS_REST_URL.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim();
+          const token = process.env.UPSTASH_REDIS_REST_TOKEN.trim().replace(/^["']|["']$/g, '');
+          redisUrl = `rediss://default:${token}@${host}:6379`;
+        }
+
         if (redisUrl) {
           redisUrl = redisUrl.replace(/^["']|["']$/g, '').trim();
           redisUrl = redisUrl.replace(/^REDIS_URL\s*=\s*/i, '').trim();
+
+          // If someone pasted the https:// URL into REDIS_URL and also provided the token
+          if (redisUrl.startsWith('https://') && process.env.UPSTASH_REDIS_REST_TOKEN) {
+            const host = redisUrl.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim();
+            const token = process.env.UPSTASH_REDIS_REST_TOKEN.trim().replace(/^["']|["']$/g, '');
+            redisUrl = `rediss://default:${token}@${host}:6379`;
+          }
         }
 
         if (redisUrl && (redisUrl.startsWith('redis://') || redisUrl.startsWith('rediss://'))) {
