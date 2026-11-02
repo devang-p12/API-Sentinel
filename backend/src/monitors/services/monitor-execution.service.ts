@@ -6,6 +6,7 @@ import { ExecutionStatus } from '@prisma/client';
 import { AlertEvaluationService } from '../../alert-rules/services/alert-evaluation.service';
 import { MonitorJobData } from '../workers/monitor.worker';
 import { PrometheusMetricsService } from '../../metrics/prometheus-metrics.service';
+import { SchemaMonitoringService } from '../../schema-monitoring/schema-monitoring.service';
 
 export interface ExecutionQueryOptions {
   limit?: number;
@@ -27,6 +28,7 @@ export class MonitorExecutionService {
     private readonly incidentEvaluator: IncidentEvaluatorService,
     @Optional() private readonly alertEvaluator?: AlertEvaluationService,
     @Optional() private readonly metricsService?: PrometheusMetricsService,
+    @Optional() private readonly schemaMonitoringService?: SchemaMonitoringService,
   ) {}
 
   /**
@@ -158,11 +160,49 @@ export class MonitorExecutionService {
       assertions,
     });
 
-    // 3. Persist MonitorResult and MonitorExecution to PostgreSQL
     const resolvedApiId = monitor.apiId || monitor.environment?.apiId;
     const resolvedOrgId = monitor.organizationId;
     const resolvedEnvId = monitor.environmentId;
 
+    // Evaluate Schema Contract Conformance (Detect unexpected schema drift even when HTTP 200 OK)
+    if (
+      this.schemaMonitoringService &&
+      resolvedApiId &&
+      probeResult.statusCode &&
+      probeResult.statusCode >= 200 &&
+      probeResult.statusCode < 300 &&
+      probeResult.responseBody
+    ) {
+      try {
+        const schemaComparison = await this.schemaMonitoringService.processResponse({
+          organizationId: resolvedOrgId,
+          apiId: resolvedApiId,
+          environmentId: resolvedEnvId,
+          endpoint: targetUrl || monitor.url,
+          method: monitor.method || 'GET',
+          statusCode: probeResult.statusCode,
+          responseBody: probeResult.responseBody,
+          autoBaselineIfMissing: false,
+        });
+
+        if (schemaComparison.hasBreakingChanges) {
+          probeResult.schemaValid = false;
+          probeResult.errorType = 'SCHEMA_ERROR';
+          const breakingDesc = schemaComparison.changes
+            .filter((c) => c.isBreaking)
+            .map((c) => c.description)
+            .join('; ');
+          const schemaMsg = `Contract drift violation (HTTP ${probeResult.statusCode}): ${breakingDesc}`;
+          probeResult.errorMessage = probeResult.errorMessage
+            ? `${probeResult.errorMessage} | ${schemaMsg}`
+            : schemaMsg;
+        }
+      } catch (schemaErr: any) {
+        this.logger.debug(`Schema monitoring evaluation skipped: ${schemaErr.message}`);
+      }
+    }
+
+    // 3. Persist MonitorResult and MonitorExecution to PostgreSQL
     const recorded = await this.recordExecution({
       monitorId: monitor.id,
       isConfigModel,

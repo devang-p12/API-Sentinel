@@ -113,4 +113,49 @@ export class SchemaMonitoringController {
       user.userId,
     );
   }
+
+  @Post('schemas/set-baseline')
+  setBaseSchema(
+    @CurrentUser() user: any,
+    @Body()
+    dto: {
+      apiId: string;
+      endpoint: string;
+      method?: string;
+      environmentId?: string;
+      samplePayload?: any;
+      headers?: Record<string, string>;
+      body?: any;
+      queryParams?: Record<string, any>;
+      fetchLive?: boolean;
+    },
+  ) {
+    return this.schemaService.setBaseSchema({
+      ...dto,
+      organizationId: user.organizationId,
+      userId: user.userId,
+    });
+  }
+
+  @Post('schemas/:id/verify')
+  verifySchemaNow(
+    @CurrentUser() user: any,
+    @Param('id') schemaId: string,
+    @Body()
+    dto?: {
+      headers?: Record<string, string>;
+      body?: any;
+      queryParams?: Record<string, any>;
+    },
+  ) {
+    return this.schemaService.verifySchemaNow(schemaId, user.organizationId, dto);
+  }
+
+  @Post('schemas/changes/:changeId/acknowledge')
+  acknowledgeChange(
+    @CurrentUser() user: any,
+    @Param('changeId') changeId: string,
+  ) {
+    return this.schemaService.acknowledgeChange(changeId, user.organizationId);
+  }
 }

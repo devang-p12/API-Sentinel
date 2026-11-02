@@ -9,12 +9,15 @@ import {
   ArrowReloadHorizontalIcon,
   Tick01Icon,
   ViewIcon,
+  Add01Icon,
+  PlayIcon,
 } from '@hugeicons/core-free-icons';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { SetBaseSchemaDialog } from '@/components/contracts/SetBaseSchemaDialog';
 import {
   Dialog,
   DialogContent,
@@ -48,6 +51,22 @@ export function ContractsPage() {
   const [inspectSchema, setInspectSchema] = useState<ApiSchemaSummary | null>(null);
   const [isApproving, setIsApproving] = useState(false);
   const [approvalSuccess, setApprovalSuccess] = useState<string | null>(null);
+
+  // Set Base Schema Dialog State
+  const [isSetBaselineOpen, setIsSetBaselineOpen] = useState(false);
+
+  // Schema Verification State
+  const [verifyingSchemaId, setVerifyingSchemaId] = useState<string | null>(null);
+  const [verificationBanner, setVerificationBanner] = useState<{
+    schemaId: string;
+    hasBreakingChanges: boolean;
+    summary: string;
+    statusCode?: number;
+    durationMs?: number;
+  } | null>(null);
+
+  // Acknowledging State
+  const [acknowledgingId, setAcknowledgingId] = useState<string | null>(null);
 
   const fetchData = useCallback(async (showRefreshing = false) => {
     if (showRefreshing) setIsRefreshing(true);
@@ -93,6 +112,43 @@ export function ContractsPage() {
       alert(err?.message || 'Failed to approve new baseline.');
     } finally {
       setIsApproving(false);
+    }
+  };
+
+  // Handle Verify Schema Now (Live Request)
+  const handleVerifySchema = async (schemaId: string) => {
+    setVerifyingSchemaId(schemaId);
+    setVerificationBanner(null);
+    try {
+      const result = await api.verifySchema(schemaId);
+      setVerificationBanner({
+        schemaId,
+        hasBreakingChanges: result.hasBreakingChanges,
+        summary: result.summary,
+        statusCode: result.statusCode,
+        durationMs: result.durationMs,
+      });
+      // Refresh data so newly detected breaking drift immediately registers in state
+      await fetchData(true);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to verify schema against endpoint.');
+    } finally {
+      setVerifyingSchemaId(null);
+    }
+  };
+
+  // Handle Acknowledge Change
+  const handleAcknowledgeChange = async (changeId: string) => {
+    setAcknowledgingId(changeId);
+    try {
+      await api.acknowledgeSchemaChange(changeId);
+      setChanges((prev) =>
+        prev.map((c) => (c.id === changeId ? { ...c, isAcknowledged: true } : c)),
+      );
+    } catch (err: any) {
+      alert(err?.message || 'Failed to acknowledge change.');
+    } finally {
+      setAcknowledgingId(null);
     }
   };
 
@@ -155,6 +211,15 @@ export function ContractsPage() {
             {isRefreshing ? 'Refreshing...' : 'Refresh'}
           </Button>
           <Button
+            size="sm"
+            onClick={() => setIsSetBaselineOpen(true)}
+            className="h-8 text-xs font-mono font-bold"
+          >
+            <HugeiconsIcon icon={Add01Icon} className="size-3.5 mr-1.5" />
+            Set Base Schema
+          </Button>
+          <Button
+            variant="outline"
             size="sm"
             onClick={() => navigate('/api-tester')}
             className="h-8 text-xs font-mono"
@@ -338,13 +403,24 @@ export function ContractsPage() {
                     ? 'No schemas match the current filter criteria.'
                     : 'Run a health check or execute a probe in the API Tester. Sentinel automatically establishes baseline contracts on the first successful 200 OK response.'}
                 </p>
-                <Button
-                  size="sm"
-                  onClick={() => navigate('/api-tester')}
-                  className="h-8 text-xs font-mono"
-                >
-                  Open API Tester
-                </Button>
+                <div className="flex items-center justify-center gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => setIsSetBaselineOpen(true)}
+                    className="h-8 text-xs font-mono font-bold"
+                  >
+                    <HugeiconsIcon icon={Add01Icon} className="size-3.5 mr-1.5" />
+                    Establish Base Schema
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate('/api-tester')}
+                    className="h-8 text-xs font-mono"
+                  >
+                    Open API Tester
+                  </Button>
+                </div>
               </Card>
             ) : (
               <div className="border border-border bg-card divide-y divide-border">
@@ -355,9 +431,9 @@ export function ContractsPage() {
                   return (
                     <div
                       key={schema.id}
-                      className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-muted/10 transition-colors"
+                      className="p-4 flex flex-col sm:flex-row sm:items-start justify-between gap-4 hover:bg-muted/10 transition-colors"
                     >
-                      <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="space-y-2 flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Badge
                             variant="outline"
@@ -412,10 +488,53 @@ export function ContractsPage() {
                             <strong className="text-foreground">{schema._count?.changes || 0}</strong>
                           </span>
                         </div>
+
+                        {verificationBanner?.schemaId === schema.id && (
+                          <div
+                            className={`p-2.5 text-xs font-mono rounded border flex items-center justify-between ${
+                              verificationBanner.hasBreakingChanges
+                                ? 'bg-rose-500/10 border-rose-500/30 text-rose-500 font-bold'
+                                : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span>
+                                {verificationBanner.hasBreakingChanges
+                                  ? '● BREAKING CONTRACT DRIFT (200 OK)'
+                                  : '✓ CONTRACT CONFORMS'}
+                              </span>
+                              {verificationBanner.statusCode && (
+                                <span>(HTTP {verificationBanner.statusCode} OK)</span>
+                              )}
+                              <span>— {verificationBanner.summary}</span>
+                            </div>
+                            {verificationBanner.durationMs !== undefined && (
+                              <span className="text-[10px] opacity-75 shrink-0 ml-2">
+                                {verificationBanner.durationMs}ms
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       {/* Action Buttons */}
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-2 shrink-0 pt-1 sm:pt-0">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleVerifySchema(schema.id)}
+                          disabled={verifyingSchemaId === schema.id}
+                          className="h-8 text-xs font-mono border-primary/40 hover:bg-primary/10 text-primary"
+                          title="Trigger live probe and detect schema deviations on HTTP 200 OK"
+                        >
+                          <HugeiconsIcon
+                            icon={PlayIcon}
+                            className={`size-3.5 mr-1.5 ${
+                              verifyingSchemaId === schema.id ? 'animate-spin' : ''
+                            }`}
+                          />
+                          {verifyingSchemaId === schema.id ? 'Verifying...' : 'Verify Schema'}
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"
@@ -485,9 +604,26 @@ export function ContractsPage() {
                           {change.fieldPath}
                         </span>
                       </div>
-                      <span className="text-[11px] font-mono text-muted-foreground">
-                        {new Date(change.detectedAt).toLocaleString()}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-mono text-muted-foreground">
+                          {new Date(change.detectedAt).toLocaleString()}
+                        </span>
+                        {change.isAcknowledged ? (
+                          <Badge variant="outline" className="text-[9px] font-mono text-muted-foreground border-border">
+                            ✓ Acknowledged
+                          </Badge>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleAcknowledgeChange(change.id)}
+                            disabled={acknowledgingId === change.id}
+                            className="h-6 text-[10px] font-mono px-2"
+                          >
+                            {acknowledgingId === change.id ? 'Saving...' : 'Acknowledge'}
+                          </Button>
+                        )}
+                      </div>
                     </div>
 
                     <p className="text-xs text-muted-foreground font-mono">
@@ -644,6 +780,16 @@ export function ContractsPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* SET BASE SCHEMA MODAL */}
+      <SetBaseSchemaDialog
+        open={isSetBaselineOpen}
+        onOpenChange={setIsSetBaselineOpen}
+        apis={apis}
+        onSuccess={() => {
+          fetchData(true);
+        }}
+      />
     </PageContainer>
   );
 }

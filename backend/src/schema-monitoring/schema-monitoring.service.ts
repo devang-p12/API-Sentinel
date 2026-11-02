@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RequestExecutionService } from '../request-execution/request-execution.service';
 import {
   NormalizedSchemaNode,
   ProcessResponseOptions,
@@ -17,7 +18,10 @@ import { SchemaDiffEngine } from './schema-diff-engine';
 export class SchemaMonitoringService {
   private readonly logger = new Logger(SchemaMonitoringService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly requestExecutionService: RequestExecutionService,
+  ) {}
 
   /**
    * Normalizes raw JSON response body into structural schema AST.
@@ -88,7 +92,6 @@ export class SchemaMonitoringService {
       where: {
         organizationId,
         apiId,
-        environmentId: environmentId || null,
         endpoint,
         method: method.toUpperCase(),
       },
@@ -100,6 +103,45 @@ export class SchemaMonitoringService {
     });
 
     if (!schema) {
+      try {
+        const dummyBase = 'http://sentinel.local';
+        const parsedPath = new URL(
+          endpoint.startsWith('http') ? endpoint : `${dummyBase}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`,
+        ).pathname;
+        schema = await this.prisma.apiSchema.findFirst({
+          where: {
+            organizationId,
+            apiId,
+            method: method.toUpperCase(),
+            endpoint: {
+              in: [parsedPath, endpoint],
+            },
+          },
+          include: {
+            versions: {
+              orderBy: { versionNumber: 'desc' },
+            },
+          },
+        });
+      } catch {
+        // ignore url parse error
+      }
+    }
+
+    if (!schema) {
+      if (!autoBaselineIfMissing) {
+        return {
+          hasChanges: false,
+          hasBreakingChanges: false,
+          changeCount: 0,
+          changes: [],
+          summary: 'No active baseline established for endpoint.',
+          normalizedCurrent,
+          schemaId: '',
+          isNewBaseline: false,
+        };
+      }
+
       schema = await this.prisma.apiSchema.create({
         data: {
           organizationId,
@@ -440,5 +482,302 @@ export class SchemaMonitoringService {
         },
       },
     });
+  }
+
+  /**
+   * Directly establishes an active contract base schema for an API endpoint.
+   * Can either probe the endpoint live or accept a user-provided sample JSON / AST payload.
+   */
+  async setBaseSchema(options: {
+    organizationId: string;
+    apiId: string;
+    environmentId?: string;
+    endpoint: string;
+    method?: string;
+    samplePayload?: any;
+    headers?: Record<string, string>;
+    body?: any;
+    queryParams?: Record<string, any>;
+    fetchLive?: boolean;
+    userId?: string;
+  }) {
+    const {
+      organizationId,
+      apiId,
+      environmentId,
+      endpoint,
+      method = 'GET',
+      headers = {},
+      body,
+      queryParams,
+      fetchLive,
+      userId,
+    } = options;
+
+    if (!apiId || !endpoint) {
+      throw new BadRequestException('API ID and endpoint are required to establish a schema baseline.');
+    }
+
+    // Verify API belongs to organization
+    const apiRecord = await this.prisma.api.findFirst({
+      where: { id: apiId, organizationId },
+      include: {
+        environments: true,
+      },
+    });
+
+    if (!apiRecord) {
+      throw new NotFoundException(`API with ID ${apiId} not found in organization.`);
+    }
+
+    let payloadToUse = options.samplePayload;
+
+    if (fetchLive || payloadToUse === undefined) {
+      // Resolve target URL
+      let targetUrl = endpoint.trim();
+      if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+        const selectedEnv = environmentId
+          ? apiRecord.environments.find((e) => e.id === environmentId)
+          : apiRecord.environments[0];
+
+        const baseUrl = selectedEnv?.baseUrl || apiRecord.environments?.[0]?.baseUrl;
+        if (!baseUrl) {
+          throw new BadRequestException(
+            'Unable to determine base URL. Please provide a full URL (e.g. https://api.com/users) or configure a Base URL on the environment.',
+          );
+        }
+        const cleanBase = baseUrl.replace(/\/+$/, '');
+        const cleanPath = targetUrl.startsWith('/') ? targetUrl : `/${targetUrl}`;
+        targetUrl = `${cleanBase}${cleanPath}`;
+      }
+
+      this.logger.log(`Fetching live baseline from ${method.toUpperCase()} ${targetUrl}`);
+
+      const execResult = await this.requestExecutionService.execute({
+        method: method.toUpperCase(),
+        url: targetUrl,
+        headers,
+        body,
+        queryParams,
+        timeoutMs: 15000,
+      });
+
+      if (!execResult.statusCode || execResult.statusCode < 200 || execResult.statusCode >= 300) {
+        throw new BadRequestException(
+          `Target endpoint returned HTTP ${execResult.statusCode || 'N/A'}: ${execResult.error || 'Expected 2xx successful response to establish contract baseline.'}`,
+        );
+      }
+
+      payloadToUse =
+        execResult.body !== undefined && execResult.body !== null
+          ? execResult.body
+          : execResult.rawBody
+          ? JSON.parse(execResult.rawBody)
+          : {};
+    } else if (typeof payloadToUse === 'string') {
+      try {
+        payloadToUse = JSON.parse(payloadToUse);
+      } catch (err: any) {
+        throw new BadRequestException(`Invalid JSON payload provided: ${err.message}`);
+      }
+    }
+
+    const normalized = this.normalizePayload(payloadToUse);
+    const checksum = SchemaNormalizer.computeChecksum(normalized);
+
+    // Upsert or find ApiSchema
+    let schema = await this.prisma.apiSchema.findFirst({
+      where: {
+        organizationId,
+        apiId,
+        endpoint,
+        method: method.toUpperCase(),
+      },
+      include: {
+        versions: {
+          orderBy: { versionNumber: 'desc' },
+        },
+      },
+    });
+
+    if (!schema) {
+      schema = await this.prisma.apiSchema.create({
+        data: {
+          organizationId,
+          apiId,
+          environmentId: environmentId || null,
+          endpoint,
+          method: method.toUpperCase(),
+        },
+        include: {
+          versions: true,
+        },
+      });
+    } else if (environmentId && schema.environmentId !== environmentId) {
+      schema = await this.prisma.apiSchema.update({
+        where: { id: schema.id },
+        data: { environmentId },
+        include: { versions: { orderBy: { versionNumber: 'desc' } } },
+      });
+    }
+
+    // Unset prior baselines
+    await this.prisma.schemaVersion.updateMany({
+      where: { schemaId: schema.id, isBaseline: true },
+      data: { isBaseline: false },
+    });
+
+    const nextVer = (schema.versions?.[0]?.versionNumber || 0) + 1;
+    const newVersion = await this.prisma.schemaVersion.create({
+      data: {
+        schemaId: schema.id,
+        versionNumber: nextVer,
+        isBaseline: true,
+        normalizedSchema: normalized as any,
+        samplePayload: payloadToUse,
+        checksum,
+        createdByUserId: userId || null,
+        approvedAt: new Date(),
+      },
+    });
+
+    await this.prisma.apiSchema.update({
+      where: { id: schema.id },
+      data: { activeBaselineVersionId: newVersion.id },
+    });
+
+    // Mark existing drift issues as acknowledged for this new baseline
+    await this.prisma.schemaChange.updateMany({
+      where: { schemaId: schema.id, isAcknowledged: false },
+      data: { isAcknowledged: true },
+    });
+
+    this.logger.log(
+      `Set new active baseline v${nextVer} for schema ${schema.id} (${method.toUpperCase()} ${endpoint})`,
+    );
+
+    return {
+      schema,
+      version: newVersion,
+      samplePayload: payloadToUse,
+      normalizedSchema: normalized,
+    };
+  }
+
+  /**
+   * Verifies current schema against established active baseline by making a live HTTP call.
+   * Records detected drift and returns comparison result.
+   */
+  async verifySchemaNow(
+    schemaId: string,
+    organizationId: string,
+    options?: {
+      headers?: Record<string, string>;
+      body?: any;
+      queryParams?: Record<string, any>;
+    },
+  ) {
+    const schema = await this.prisma.apiSchema.findFirst({
+      where: { id: schemaId, organizationId },
+      include: {
+        api: {
+          include: {
+            environments: true,
+          },
+        },
+        environment: true,
+        versions: {
+          orderBy: { versionNumber: 'desc' },
+        },
+      },
+    });
+
+    if (!schema) {
+      throw new NotFoundException(`Schema contract with ID ${schemaId} not found.`);
+    }
+
+    const baselineVersion =
+      schema.versions.find((v) => v.id === schema.activeBaselineVersionId) ||
+      schema.versions.find((v) => v.isBaseline);
+
+    if (!baselineVersion) {
+      throw new BadRequestException('No active baseline established for this schema contract.');
+    }
+
+    let targetUrl = schema.endpoint.trim();
+    if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+      const baseUrl =
+        schema.environment?.baseUrl ||
+        schema.api?.environments?.[0]?.baseUrl;
+
+      if (!baseUrl) {
+        throw new BadRequestException('Unable to resolve base URL for API endpoint.');
+      }
+      const cleanBase = baseUrl.replace(/\/+$/, '');
+      const cleanPath = targetUrl.startsWith('/') ? targetUrl : `/${targetUrl}`;
+      targetUrl = `${cleanBase}${cleanPath}`;
+    }
+
+    const execResult = await this.requestExecutionService.execute({
+      method: schema.method.toUpperCase(),
+      url: targetUrl,
+      headers: options?.headers,
+      body: options?.body,
+      queryParams: options?.queryParams,
+      timeoutMs: 15000,
+    });
+
+    if (!execResult.statusCode) {
+      throw new BadRequestException(`Failed to reach endpoint: ${execResult.error || 'Network connection failed'}`);
+    }
+
+    const responseBody =
+      execResult.body !== undefined && execResult.body !== null
+        ? execResult.body
+        : execResult.rawBody
+        ? JSON.parse(execResult.rawBody)
+        : {};
+
+    const diffResult = await this.processResponse({
+      organizationId,
+      apiId: schema.apiId,
+      environmentId: schema.environmentId || undefined,
+      endpoint: schema.endpoint,
+      method: schema.method,
+      statusCode: execResult.statusCode,
+      responseBody,
+      autoBaselineIfMissing: false,
+    });
+
+    return {
+      ...diffResult,
+      statusCode: execResult.statusCode,
+      durationMs: execResult.durationMs,
+      endpoint: targetUrl,
+      method: schema.method,
+    };
+  }
+
+  /**
+   * Acknowledges a detected schema drift / change event.
+   */
+  async acknowledgeChange(changeId: string, organizationId: string) {
+    const change = await this.prisma.schemaChange.findFirst({
+      where: {
+        id: changeId,
+        schema: { organizationId },
+      },
+    });
+
+    if (!change) {
+      throw new NotFoundException(`Schema change record ${changeId} not found.`);
+    }
+
+    const updated = await this.prisma.schemaChange.update({
+      where: { id: changeId },
+      data: { isAcknowledged: true },
+    });
+
+    return { success: true, change: updated };
   }
 }

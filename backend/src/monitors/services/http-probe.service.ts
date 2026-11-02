@@ -19,6 +19,7 @@ export interface ProbeResult {
   responseTimeMs: number;
   responseSize: number | null;
   responseHeaders: Record<string, string> | null;
+  responseBody?: any;
   errorMessage: string | null;
   assertionResults: any;
   isTimeout: boolean;
@@ -198,12 +199,22 @@ export class HttpProbeService {
       }
     }
 
+    let responseBody = res.body;
+    if (responseBody === undefined && res.rawBody) {
+      try {
+        responseBody = JSON.parse(res.rawBody);
+      } catch {
+        responseBody = res.rawBody;
+      }
+    }
+
     return {
       status: isSuccess ? ExecutionStatus.SUCCESS : ExecutionStatus.FAILED,
       statusCode: res.statusCode,
       responseTimeMs: res.durationMs,
       responseSize: res.sizeBytes,
       responseHeaders,
+      responseBody,
       errorMessage,
       assertionResults,
       isTimeout: false,

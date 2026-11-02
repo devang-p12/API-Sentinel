@@ -10,9 +10,16 @@ import { AlertRulesModule } from '../alert-rules/alert-rules.module';
 import { RequestExecutionModule } from '../request-execution/request-execution.module';
 import { HealthEvaluationModule } from '../health-evaluation/health-evaluation.module';
 import { MetricsModule } from '../metrics/metrics.module';
+import { SchemaMonitoringModule } from '../schema-monitoring/schema-monitoring.module';
 
 @Module({
-  imports: [AlertRulesModule, RequestExecutionModule, HealthEvaluationModule, MetricsModule],
+  imports: [
+    AlertRulesModule,
+    RequestExecutionModule,
+    HealthEvaluationModule,
+    MetricsModule,
+    SchemaMonitoringModule,
+  ],
   controllers: [MonitorsController],
   providers: [
     MonitorsService,

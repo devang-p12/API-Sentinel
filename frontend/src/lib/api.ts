@@ -1437,6 +1437,53 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  setBaseSchema: (data: {
+    apiId: string;
+    endpoint: string;
+    method?: string;
+    environmentId?: string;
+    samplePayload?: any;
+    headers?: Record<string, string>;
+    body?: any;
+    queryParams?: Record<string, any>;
+    fetchLive?: boolean;
+  }) =>
+    fetchJson<{
+      schema: ApiSchemaSummary;
+      version: any;
+      samplePayload: any;
+      normalizedSchema: any;
+    }>('/schemas/set-baseline', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  verifySchema: (
+    schemaId: string,
+    data?: {
+      headers?: Record<string, string>;
+      body?: any;
+      queryParams?: Record<string, any>;
+    },
+  ) =>
+    fetchJson<{
+      hasChanges: boolean;
+      hasBreakingChanges: boolean;
+      changeCount: number;
+      changes: SchemaChangeItem[];
+      summary: string;
+      statusCode?: number;
+      durationMs?: number;
+      endpoint?: string;
+      method?: string;
+    }>(`/schemas/${schemaId}/verify`, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    }),
+  acknowledgeSchemaChange: (changeId: string) =>
+    fetchJson<{ success: boolean; change: SchemaChangeItem }>(
+      `/schemas/changes/${changeId}/acknowledge`,
+      { method: 'POST' },
+    ),
 };
 
 export interface ApiSchemaSummary {
