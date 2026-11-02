@@ -16,7 +16,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { api, type Api, type Environment, type ApiSchemaSummary } from '@/lib/api';
+import { api, type Api, type Environment, type ApiSchemaSummary, type Monitor } from '@/lib/api';
 
 interface SetBaseSchemaDialogProps {
   open: boolean;
@@ -38,8 +38,13 @@ export function SetBaseSchemaDialog({
   const [selectedApiId, setSelectedApiId] = useState<string>(initialApiId || (apis[0]?.id ?? ''));
   const [selectedEnvId, setSelectedEnvId] = useState<string>('');
   const [method, setMethod] = useState<string>('GET');
-  const [endpoint, setEndpoint] = useState<string>('/api/v1/');
-  
+  const [endpoint, setEndpoint] = useState<string>('/');
+
+  // Registered Monitors / Endpoints
+  const [monitors, setMonitors] = useState<Monitor[]>([]);
+  const [selectedMonitorId, setSelectedMonitorId] = useState<string>('');
+  const [isCustomEndpoint, setIsCustomEndpoint] = useState<boolean>(false);
+
   // Advanced Config (Headers, Body)
   const [showConfig, setShowConfig] = useState(false);
   const [headersJson, setHeadersJson] = useState<string>('{\n  "Content-Type": "application/json"\n}');
@@ -47,11 +52,23 @@ export function SetBaseSchemaDialog({
 
   // Baseline Definition Mode
   const [baselineMode, setBaselineMode] = useState<'fetchLive' | 'pasteJson'>('fetchLive');
-  const [samplePayloadText, setSamplePayloadText] = useState<string>('{\n  "status": "success",\n  "data": {\n    "id": "item_123",\n    "name": "Sample Record",\n    "active": true\n  }\n}');
+  const [samplePayloadText, setSamplePayloadText] = useState<string>(
+    '{\n  "status": "success",\n  "data": {\n    "id": "item_123",\n    "name": "Sample Record",\n    "active": true\n  }\n}',
+  );
 
   // Status & Feedback
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Fetch all registered monitors when dialog opens
+  useEffect(() => {
+    if (open) {
+      api
+        .getMonitors()
+        .then((mons) => setMonitors(mons))
+        .catch(() => []);
+    }
+  }, [open]);
 
   // Sync selected API if initial changes
   useEffect(() => {
@@ -81,6 +98,91 @@ export function SetBaseSchemaDialog({
   const selectedEnvironment: Environment | undefined = useMemo(() => {
     return environments.find((e) => e.id === selectedEnvId);
   }, [environments, selectedEnvId]);
+
+  // Filter monitors for currently selected API
+  const apiMonitors = useMemo(() => {
+    return monitors.filter((m) => {
+      const mApiId = (m as any).apiId || m.environment?.apiId;
+      return mApiId === selectedApiId;
+    });
+  }, [monitors, selectedApiId]);
+
+  // When selected API or its monitors change, auto-select the first registered endpoint
+  useEffect(() => {
+    if (apiMonitors.length > 0) {
+      const first = apiMonitors[0];
+      setSelectedMonitorId(first.id);
+      setIsCustomEndpoint(false);
+      setMethod(first.method || 'GET');
+      setEndpoint(first.url || (first as any).endpoint || '/');
+      if (first.environmentId) setSelectedEnvId(first.environmentId);
+      if (first.headers && Object.keys(first.headers).length > 0) {
+        setHeadersJson(JSON.stringify(first.headers, null, 2));
+      }
+      if (first.body) {
+        setRequestBodyJson(
+          typeof first.body === 'string' ? first.body : JSON.stringify(first.body, null, 2),
+        );
+      }
+    } else {
+      setSelectedMonitorId('__ROOT__');
+      setIsCustomEndpoint(false);
+      setMethod('GET');
+      setEndpoint('/');
+    }
+  }, [selectedApiId, apiMonitors]);
+
+  // Handle Endpoint Dropdown Selection
+  const handleEndpointSelect = (value: string) => {
+    if (value === '__CUSTOM__') {
+      setSelectedMonitorId('__CUSTOM__');
+      setIsCustomEndpoint(true);
+      return;
+    }
+
+    setIsCustomEndpoint(false);
+    if (value === '__ROOT__') {
+      setSelectedMonitorId('__ROOT__');
+      setEndpoint('/');
+      setMethod('GET');
+      return;
+    }
+
+    setSelectedMonitorId(value);
+    const found = apiMonitors.find((m) => m.id === value);
+    if (found) {
+      setMethod(found.method || 'GET');
+      setEndpoint(found.url || (found as any).endpoint || '/');
+      if (found.environmentId) setSelectedEnvId(found.environmentId);
+      if (found.headers && Object.keys(found.headers).length > 0) {
+        setHeadersJson(JSON.stringify(found.headers, null, 2));
+      } else {
+        setHeadersJson('{\n  "Content-Type": "application/json"\n}');
+      }
+      if (found.body) {
+        setRequestBodyJson(
+          typeof found.body === 'string' ? found.body : JSON.stringify(found.body, null, 2),
+        );
+      } else {
+        setRequestBodyJson('{\n  \n}');
+      }
+    }
+  };
+
+  // Full Resolved Target URL
+  const resolvedFullUrl = useMemo(() => {
+    const cleanEndpoint = endpoint.trim();
+    if (cleanEndpoint.startsWith('http://') || cleanEndpoint.startsWith('https://')) {
+      return cleanEndpoint;
+    }
+    const baseUrl = selectedEnvironment?.baseUrl || currentApi?.environments?.[0]?.baseUrl;
+    if (baseUrl) {
+      const cleanBase = baseUrl.replace(/\/+$/, '');
+      const path = cleanEndpoint.startsWith('/') ? cleanEndpoint : `/${cleanEndpoint}`;
+      return `${cleanBase}${path}`;
+    }
+    return cleanEndpoint;
+  }, [endpoint, selectedEnvironment, currentApi]);
 
   // Reset errors when inputs change
   useEffect(() => {
@@ -113,7 +215,7 @@ export function SetBaseSchemaDialog({
       return;
     }
     if (!endpoint.trim()) {
-      setError('Please enter an endpoint path or URL.');
+      setError('Please select or specify an endpoint path.');
       return;
     }
 
@@ -153,7 +255,7 @@ export function SetBaseSchemaDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto bg-card border-border font-mono text-xs">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto bg-card border-border font-mono text-xs">
         <DialogHeader>
           <div className="flex items-center gap-2">
             <span className="p-1.5 bg-primary/10 text-primary border border-primary/20 rounded">
@@ -164,8 +266,9 @@ export function SetBaseSchemaDialog({
             </DialogTitle>
           </div>
           <DialogDescription className="text-xs font-mono text-muted-foreground">
-            Configure an API endpoint and establish its base schema contract. Sentinel continuously
-            monitors responses and detects silent schema violations—even when the API returns HTTP 200 OK.
+            Select directly from your registered APIs and endpoints. Sentinel will continuously
+            monitor responses against this baseline contract and detect silent schema drift—even on
+            HTTP 200 OK.
           </DialogDescription>
         </DialogHeader>
 
@@ -176,16 +279,16 @@ export function SetBaseSchemaDialog({
         )}
 
         <div className="space-y-4 py-2">
-          {/* STEP 1: Select API & Environment */}
+          {/* STEP 1: Select Registered API */}
           <div className="p-3 bg-muted/20 border border-border space-y-3">
             <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
-              1. Target API &amp; Environment
+              1. Select Registered API
             </span>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-[11px] font-semibold text-foreground block mb-1">
-                  Registered API *
+                  API Service *
                 </label>
                 <select
                   value={selectedApiId}
@@ -202,14 +305,14 @@ export function SetBaseSchemaDialog({
 
               <div>
                 <label className="text-[11px] font-semibold text-foreground block mb-1">
-                  Target Environment
+                  Environment
                 </label>
                 <select
                   value={selectedEnvId}
                   onChange={(e) => setSelectedEnvId(e.target.value)}
                   className="w-full h-8 px-2.5 text-xs bg-background border border-input rounded-none focus:outline-none focus:border-ring font-mono text-foreground"
                 >
-                  <option value="">No specific environment</option>
+                  <option value="">Default Environment</option>
                   {environments.map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.name} {e.baseUrl ? `(${e.baseUrl})` : ''}
@@ -218,63 +321,123 @@ export function SetBaseSchemaDialog({
                 </select>
               </div>
             </div>
-
-            {selectedEnvironment?.baseUrl && (
-              <div className="text-[10px] text-muted-foreground">
-                Base URL:{' '}
-                <strong className="text-foreground font-mono">{selectedEnvironment.baseUrl}</strong>
-              </div>
-            )}
           </div>
 
-          {/* STEP 2: Endpoint & Method Configuration */}
+          {/* STEP 2: Choose Registered Endpoint (Direct Selection) */}
           <div className="p-3 bg-muted/20 border border-border space-y-3">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
-              2. Endpoint &amp; Method (Configurable Mode)
-            </span>
-
-            <div className="flex flex-col sm:flex-row items-stretch gap-2">
-              <div className="w-full sm:w-28 shrink-0">
-                <select
-                  value={method}
-                  onChange={(e) => setMethod(e.target.value)}
-                  className="w-full h-8 px-2 text-xs font-bold bg-background border border-input rounded-none focus:outline-none font-mono text-foreground"
-                >
-                  {HTTP_METHODS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex-1">
-                <Input
-                  value={endpoint}
-                  onChange={(e) => setEndpoint(e.target.value)}
-                  placeholder="/api/v1/orders or https://api.mycorp.com/v1/orders"
-                  className="h-8 text-xs font-mono"
-                />
-              </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
+                2. Registered Endpoint
+              </span>
+              {apiMonitors.length > 0 && !isCustomEndpoint && (
+                <span className="text-[10px] text-emerald-500 font-semibold flex items-center gap-1">
+                  ✓ Config auto-loaded from registered API
+                </span>
+              )}
             </div>
 
-            {/* Toggle advanced Headers / Body for POST/PUT */}
+            {/* Dropdown of Endpoints */}
+            <div>
+              <label className="text-[11px] font-semibold text-foreground block mb-1">
+                Select Registered Endpoint / Monitor
+              </label>
+              <select
+                value={selectedMonitorId}
+                onChange={(e) => handleEndpointSelect(e.target.value)}
+                className="w-full h-8 px-2.5 text-xs bg-background border border-input rounded-none focus:outline-none focus:border-ring font-mono text-foreground font-semibold"
+              >
+                {apiMonitors.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    [{m.method}] {m.name} — {m.url || (m as any).endpoint} ({m.environment?.name || 'Default'})
+                  </option>
+                ))}
+                <option value="__ROOT__">
+                  [GET] API Base URL Root (/) {selectedEnvironment?.baseUrl ? `— ${selectedEnvironment.baseUrl}` : ''}
+                </option>
+                <option value="__CUSTOM__">+ Custom Endpoint Path (Manual)...</option>
+              </select>
+            </div>
+
+            {/* Auto-populated Target Summary (Zero Manual Typing) */}
+            {!isCustomEndpoint ? (
+              <div className="p-2.5 bg-background border border-border space-y-1.5 text-xs font-mono">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] font-mono font-bold ${
+                      method === 'GET'
+                        ? 'text-emerald-500 border-emerald-500/30 bg-emerald-500/10'
+                        : method === 'POST'
+                        ? 'text-blue-500 border-blue-500/30 bg-blue-500/10'
+                        : method === 'PUT'
+                        ? 'text-amber-500 border-amber-500/30 bg-amber-500/10'
+                        : 'text-purple-500 border-purple-500/30 bg-purple-500/10'
+                    }`}
+                  >
+                    {method}
+                  </Badge>
+                  <span className="font-semibold text-foreground break-all">
+                    {resolvedFullUrl}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3 text-[10px] text-muted-foreground pt-1 border-t border-border/40 flex-wrap">
+                  <span>
+                    Environment: <strong className="text-foreground">{selectedEnvironment?.name || 'Default'}</strong>
+                  </span>
+                  {selectedEnvironment?.baseUrl && (
+                    <span>
+                      Base URL: <strong className="text-foreground">{selectedEnvironment.baseUrl}</strong>
+                    </span>
+                  )}
+                  {['POST', 'PUT', 'PATCH'].includes(method) && (
+                    <Badge variant="outline" className="text-[9px] px-1 py-0">
+                      Payload Configured
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* Manual Input ONLY if user specifically selects Custom */
+              <div className="space-y-2 pt-1 border-t border-border/40">
+                <div className="flex flex-col sm:flex-row items-stretch gap-2">
+                  <div className="w-full sm:w-28 shrink-0">
+                    <select
+                      value={method}
+                      onChange={(e) => setMethod(e.target.value)}
+                      className="w-full h-8 px-2 text-xs font-bold bg-background border border-input rounded-none focus:outline-none font-mono text-foreground"
+                    >
+                      {HTTP_METHODS.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex-1">
+                    <Input
+                      value={endpoint}
+                      onChange={(e) => setEndpoint(e.target.value)}
+                      placeholder="/api/v1/users or https://api.com/users"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Collapsible Headers / Body Config */}
             <div className="pt-1">
               <button
                 type="button"
                 onClick={() => setShowConfig(!showConfig)}
                 className="text-[11px] text-primary hover:underline font-mono flex items-center gap-1"
               >
-                <span>{showConfig ? '▲ Hide' : '▼ Show'} Request Headers &amp; Body Config</span>
-                {['POST', 'PUT', 'PATCH'].includes(method) && !showConfig && (
-                  <Badge variant="outline" className="text-[9px] px-1 py-0 bg-primary/10 text-primary">
-                    Required for {method}
-                  </Badge>
-                )}
+                <span>{showConfig ? '▲ Hide' : '▼ Inspect / Edit'} Request Headers &amp; Payload</span>
               </button>
 
               {showConfig && (
-                <div className="mt-3 space-y-3 border-t border-border/50 pt-3">
+                <div className="mt-2.5 space-y-3 border-t border-border/50 pt-2.5">
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="text-[11px] font-semibold text-foreground">
@@ -323,10 +486,10 @@ export function SetBaseSchemaDialog({
             </div>
           </div>
 
-          {/* STEP 3: Base Schema Definition Mode */}
+          {/* STEP 3: Baseline Definition Mode */}
           <div className="p-3 bg-muted/20 border border-border space-y-3">
             <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
-              3. Set Base Schema (Baseline v1)
+              3. Baseline Contract (v1)
             </span>
 
             {/* Mode Switcher */}
@@ -342,10 +505,11 @@ export function SetBaseSchemaDialog({
               >
                 <div className="flex items-center gap-1.5 font-bold mb-0.5">
                   <HugeiconsIcon icon={PlayIcon} className="size-3.5 text-primary" />
-                  <span>Probe Live Endpoint (Instant)</span>
+                  <span>Probe Live Endpoint (1-Click)</span>
                 </div>
                 <div className="text-[10px] text-muted-foreground font-normal">
-                  Sentinel calls the endpoint, captures 200 OK response, and normalizes schema AST.
+                  Sentinel probes the selected registered endpoint, extracts the 200 OK schema AST,
+                  and saves it as active baseline.
                 </div>
               </button>
 
@@ -363,13 +527,13 @@ export function SetBaseSchemaDialog({
                   <span>Paste Sample JSON Payload</span>
                 </div>
                 <div className="text-[10px] text-muted-foreground font-normal">
-                  Paste the canonical JSON structure you expect the endpoint to return.
+                  Provide custom expected response JSON manually instead of live probing.
                 </div>
               </button>
             </div>
 
             {baselineMode === 'pasteJson' && (
-              <div className="space-y-1.5 pt-2">
+              <div className="space-y-1.5 pt-1">
                 <div className="flex items-center justify-between">
                   <label className="text-[11px] font-semibold text-foreground">
                     Expected Canonical JSON Response:
@@ -385,7 +549,7 @@ export function SetBaseSchemaDialog({
                 <textarea
                   value={samplePayloadText}
                   onChange={(e) => setSamplePayloadText(e.target.value)}
-                  rows={6}
+                  rows={5}
                   className="w-full p-2 bg-background border border-input font-mono text-[11px] focus:outline-none focus:border-ring text-foreground"
                   placeholder='{\n  "id": "item_123",\n  "status": "active"\n}'
                 />
@@ -419,7 +583,7 @@ export function SetBaseSchemaDialog({
             />
             {isLoading
               ? baselineMode === 'fetchLive'
-                ? 'Probing & Establishing...'
+                ? 'Probing & Capturing...'
                 : 'Saving Baseline...'
               : 'Establish Baseline & Start Monitoring'}
           </Button>

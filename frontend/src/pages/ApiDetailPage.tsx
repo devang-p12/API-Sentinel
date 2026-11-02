@@ -33,6 +33,7 @@ import {
 } from "@hugeicons/core-free-icons"
 import { EnvironmentFormDialog } from "@/components/environments/EnvironmentFormDialog"
 import { EditApiDialog } from "@/components/apis/EditApiDialog"
+import { SetBaseSchemaDialog } from "@/components/contracts/SetBaseSchemaDialog"
 
 // --- Custom Interactive SVG Performance Charts ---
 
@@ -255,6 +256,7 @@ export function ApiDetailPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [revealedUrls, setRevealedUrls] = useState<Record<string, boolean>>({})
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [isSetBaselineOpen, setIsSetBaselineOpen] = useState(false)
 
   const loadData = useCallback(async (quiet = false) => {
     if (!id) return
@@ -913,20 +915,42 @@ export function ApiDetailPage() {
               <Card className="border-border p-8 text-center">
                 <HugeiconsIcon icon={FileCodeIcon} className="size-8 text-muted-foreground mx-auto mb-3" />
                 <h4 className="text-sm font-semibold mb-1">No Schema Baselines Established</h4>
-                <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-                  Run a check in the API Tester or enable scheduled monitoring to automatically capture response schemas.
+                <p className="text-xs text-muted-foreground max-w-sm mx-auto mb-3">
+                  Select an endpoint from this registered API to establish a base schema contract and monitor for breaking drift.
                 </p>
+                <Button
+                  size="sm"
+                  onClick={() => setIsSetBaselineOpen(true)}
+                  className="h-8 text-xs font-mono font-bold"
+                >
+                  <HugeiconsIcon icon={Add01Icon} className="size-3.5 mr-1.5" />
+                  Establish Base Schema
+                </Button>
               </Card>
             ) : (
-              contract.schemas.map((schema) => (
-                <div key={schema.id} className="space-y-4">
-                  <Card className="border-border">
-                    <CardHeader className="p-4 border-b border-border flex flex-row items-center justify-between">
-                      <div>
-                        <CardTitle className="text-sm font-semibold font-mono flex items-center gap-2">
-                          <span className="text-cyan-400">{schema.method}</span>
-                          <span>{schema.endpoint}</span>
-                        </CardTitle>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between pb-1">
+                  <span className="text-xs text-muted-foreground font-mono">
+                    Monitored endpoint contracts for {apiInfo.name} ({contract.schemas.length})
+                  </span>
+                  <Button
+                    size="sm"
+                    onClick={() => setIsSetBaselineOpen(true)}
+                    className="h-7 text-xs font-mono font-bold"
+                  >
+                    <HugeiconsIcon icon={Add01Icon} className="size-3 mr-1" />
+                    Set Base Schema
+                  </Button>
+                </div>
+                {contract.schemas.map((schema) => (
+                  <div key={schema.id} className="space-y-4">
+                    <Card className="border-border">
+                      <CardHeader className="p-4 border-b border-border flex flex-row items-center justify-between">
+                        <div>
+                          <CardTitle className="text-sm font-semibold font-mono flex items-center gap-2">
+                            <span className="text-cyan-400">{schema.method}</span>
+                            <span>{schema.endpoint}</span>
+                          </CardTitle>
                         <CardDescription className="text-xs">
                           Active baseline established on {new Date(schema.createdAt).toLocaleDateString()}
                         </CardDescription>
@@ -988,7 +1012,8 @@ export function ApiDetailPage() {
                     </CardContent>
                   </Card>
                 </div>
-              ))
+              ))}
+              </div>
             )}
           </TabsContent>
 
@@ -1269,6 +1294,15 @@ export function ApiDetailPage() {
         apiName={apiInfo.name}
         environment={editingEnv}
         onSubmit={handleCreateOrUpdate}
+      />
+
+      {/* Set Base Schema Contract Dialog */}
+      <SetBaseSchemaDialog
+        open={isSetBaselineOpen}
+        onOpenChange={setIsSetBaselineOpen}
+        apis={details?.api ? [details.api as Api] : []}
+        initialApiId={details?.api?.id}
+        onSuccess={() => loadData(true)}
       />
     </PageContainer>
   )
