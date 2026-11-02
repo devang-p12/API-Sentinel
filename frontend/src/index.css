@@ -121,11 +121,69 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
+  }
   body {
     @apply bg-background text-foreground;
-    }
+  }
   html {
     @apply font-sans;
-    }
+  }
+
+  /* Color-scheme communication to browser OS popup engine */
+  :root {
+    color-scheme: light;
+  }
+
+  .dark,
+  :root.dark,
+  html.dark {
+    color-scheme: dark;
+  }
+
+  /* Universal Select & Option styling to prevent white-on-white text */
+  select {
+    color-scheme: light dark;
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+
+  .dark select,
+  html.dark select {
+    color-scheme: dark;
+    background-color: oklch(0.228 0.013 107.4);
+    color: oklch(0.988 0.003 106.5);
+    border-color: var(--border);
+  }
+
+  select option {
+    background-color: #ffffff;
+    color: #18181b;
+  }
+
+  .dark select option,
+  html.dark select option,
+  :root.dark select option {
+    background-color: #1c1c21 !important;
+    color: #f4f4f6 !important;
+  }
+
+  select option:checked,
+  .dark select option:checked,
+  html.dark select option:checked {
+    background-color: #2e2e38 !important;
+    color: #ffffff !important;
+  }
+
+  /* Popover & Base-UI Select/Dropdown Content */
+  [data-slot="select-content"],
+  [data-slot="dropdown-menu-content"] {
+    background-color: var(--popover) !important;
+    color: var(--popover-foreground) !important;
+    border: 1px solid var(--border) !important;
+  }
+
+  [data-slot="select-item"],
+  [data-slot="dropdown-menu-item"] {
+    color: var(--popover-foreground) !important;
+  }
 }
