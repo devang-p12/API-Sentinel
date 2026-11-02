@@ -45,13 +45,22 @@ import {
           }
         }
 
-        const commonOptions = {
+        const isTls = redisUrl.startsWith('rediss://');
+
+        const commonOptions: any = {
           maxRetriesPerRequest: null, // Required by BullMQ
           enableReadyCheck: false,
           keepAlive: 10000,
-          connectTimeout: 10000,
+          connectTimeout: 15000,
+          family: 4, // Force IPv4 to prevent ECONNRESET on container/cloud hosts
           retryStrategy: (times: number) => Math.min(times * 100, 3000),
         };
+
+        if (isTls) {
+          commonOptions.tls = {
+            rejectUnauthorized: false,
+          };
+        }
 
         if (redisUrl && (redisUrl.startsWith('redis://') || redisUrl.startsWith('rediss://'))) {
           client = new Redis(redisUrl, commonOptions);
@@ -74,8 +83,12 @@ import {
     {
       provide: MONITOR_BULL_QUEUE,
       useFactory: (redisConnection: Redis) => {
+        const client = redisConnection.duplicate();
+        client.on('error', (err) => {
+          console.warn('[Redis:MonitorQueue] Connection event:', err.message);
+        });
         return new Queue(MONITOR_QUEUE, {
-          connection: redisConnection,
+          connection: client,
           defaultJobOptions: {
             removeOnComplete: 100,
             removeOnFail: 500,
@@ -87,8 +100,12 @@ import {
     {
       provide: ALERT_BULL_QUEUE,
       useFactory: (redisConnection: Redis) => {
+        const client = redisConnection.duplicate();
+        client.on('error', (err) => {
+          console.warn('[Redis:AlertQueue] Connection event:', err.message);
+        });
         return new Queue(ALERT_EVALUATION_QUEUE, {
-          connection: redisConnection,
+          connection: client,
           defaultJobOptions: {
             removeOnComplete: 100,
             removeOnFail: 500,
@@ -100,8 +117,12 @@ import {
     {
       provide: NOTIFICATION_BULL_QUEUE,
       useFactory: (redisConnection: Redis) => {
+        const client = redisConnection.duplicate();
+        client.on('error', (err) => {
+          console.warn('[Redis:NotificationQueue] Connection event:', err.message);
+        });
         return new Queue(NOTIFICATION_QUEUE, {
-          connection: redisConnection,
+          connection: client,
           defaultJobOptions: {
             removeOnComplete: 100,
             removeOnFail: 500,
@@ -113,8 +134,12 @@ import {
     {
       provide: LOAD_TEST_BULL_QUEUE,
       useFactory: (redisConnection: Redis) => {
+        const client = redisConnection.duplicate();
+        client.on('error', (err) => {
+          console.warn('[Redis:LoadTestQueue] Connection event:', err.message);
+        });
         return new Queue(LOAD_TEST_QUEUE, {
-          connection: redisConnection,
+          connection: client,
           defaultJobOptions: {
             removeOnComplete: 100,
             removeOnFail: 500,

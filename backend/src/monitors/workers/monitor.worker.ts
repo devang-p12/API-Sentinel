@@ -16,6 +16,7 @@ export interface MonitorJobData {
 export class MonitorWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MonitorWorker.name);
   private worker: Worker;
+  private workerConnection: Redis;
 
   constructor(
     @Inject(REDIS_CONNECTION) private readonly redisConnection: Redis,
@@ -25,13 +26,19 @@ export class MonitorWorker implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     const concurrency = parseInt(process.env.MONITOR_WORKER_CONCURRENCY || '10', 10);
 
+    // BullMQ requires dedicated connection for workers due to blocking commands (BLMOVE/BRPOPLPUSH)
+    this.workerConnection = this.redisConnection.duplicate();
+    this.workerConnection.on('error', (err) => {
+      this.logger.warn(`MonitorWorker Redis socket event: ${err.message}`);
+    });
+
     this.worker = new Worker<MonitorJobData>(
       MONITOR_QUEUE,
       async (job: Job<MonitorJobData>) => {
         return this.process(job);
       },
       {
-        connection: this.redisConnection,
+        connection: this.workerConnection,
         concurrency,
       },
     );
@@ -88,6 +95,13 @@ export class MonitorWorker implements OnModuleInit, OnModuleDestroy {
     if (this.worker) {
       await this.worker.close();
       this.logger.log('MonitorWorker closed gracefully.');
+    }
+    if (this.workerConnection) {
+      try {
+        await this.workerConnection.quit();
+      } catch {
+        this.workerConnection.disconnect();
+      }
     }
   }
 }

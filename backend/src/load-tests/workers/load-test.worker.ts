@@ -21,6 +21,7 @@ export interface LoadTestJobData {
 export class LoadTestWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(LoadTestWorker.name);
   private worker: Worker<LoadTestJobData>;
+  private workerConnection: Redis;
 
   constructor(
     @Inject(REDIS_CONNECTION) private readonly redisConnection: Redis,
@@ -35,13 +36,19 @@ export class LoadTestWorker implements OnModuleInit, OnModuleDestroy {
       10,
     );
 
+    // BullMQ requires dedicated connection for workers due to blocking commands
+    this.workerConnection = this.redisConnection.duplicate();
+    this.workerConnection.on('error', (err) => {
+      this.logger.warn(`LoadTestWorker Redis socket event: ${err.message}`);
+    });
+
     this.worker = new Worker<LoadTestJobData>(
       LOAD_TEST_QUEUE,
       async (job: Job<LoadTestJobData>) => {
         return this.process(job);
       },
       {
-        connection: this.redisConnection,
+        connection: this.workerConnection,
         concurrency,
       },
     );
@@ -239,6 +246,13 @@ export class LoadTestWorker implements OnModuleInit, OnModuleDestroy {
   async onModuleDestroy() {
     if (this.worker) {
       await this.worker.close();
+    }
+    if (this.workerConnection) {
+      try {
+        await this.workerConnection.quit();
+      } catch {
+        this.workerConnection.disconnect();
+      }
     }
   }
 }

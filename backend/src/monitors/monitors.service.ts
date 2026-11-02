@@ -454,12 +454,41 @@ export class MonitorsService {
 
   async triggerManualRun(id: string, organizationId?: string) {
     const existing = await this.findOne(id, organizationId);
-    return this.schedulerService.triggerImmediateRun({
-      id,
-      organizationId: existing.organizationId,
-      apiId: existing.apiId || existing.environment?.apiId,
-      environmentId: existing.environmentId,
-    });
+
+    // 1. Execute probe directly so user gets immediate results and DB record
+    let directExecution: any = null;
+    try {
+      directExecution = await this.executionService.executeMonitor({
+        monitorId: id,
+        organizationId: existing.organizationId,
+        apiId: existing.apiId || existing.environment?.apiId,
+        environmentId: existing.environmentId,
+      });
+    } catch (err: any) {
+      this.logger.warn(`Direct execution probe failed for monitor ${id}: ${err.message}`);
+    }
+
+    // 2. Also queue in scheduler if available
+    let queueResult: any = null;
+    try {
+      queueResult = await this.schedulerService.triggerImmediateRun({
+        id,
+        organizationId: existing.organizationId,
+        apiId: existing.apiId || existing.environment?.apiId,
+        environmentId: existing.environmentId,
+      });
+    } catch (err: any) {
+      this.logger.debug(`Could not enqueue immediate BullMQ job for monitor ${id}: ${err.message}`);
+    }
+
+    return {
+      message: 'Monitor execution triggered',
+      monitorId: id,
+      queued: Boolean(queueResult?.queued),
+      executed: Boolean(directExecution),
+      execution: directExecution,
+      timestamp: new Date().toISOString(),
+    };
   }
 
   // ==========================================

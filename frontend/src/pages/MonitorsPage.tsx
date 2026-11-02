@@ -22,6 +22,7 @@ import {
   Delete01Icon,
   ArrowRight01Icon,
   ApiIcon,
+  PlayIcon,
 } from "@hugeicons/core-free-icons"
 import { MonitorFormDialog } from "@/components/monitors/MonitorFormDialog"
 import { DeleteMonitorDialog } from "@/components/monitors/DeleteMonitorDialog"
@@ -58,6 +59,7 @@ export function MonitorsPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [editingMonitor, setEditingMonitor] = useState<Monitor | null>(null)
   const [deletingMonitor, setDeletingMonitor] = useState<Monitor | null>(null)
+  const [runningMonitorId, setRunningMonitorId] = useState<string | null>(null)
 
   const fetchData = useCallback(async () => {
     try {
@@ -89,6 +91,18 @@ export function MonitorsPage() {
       )
     } catch (err: any) {
       alert(err?.message || "Failed to toggle monitor status.")
+    }
+  }
+
+  const handleRunNow = async (monitorId: string) => {
+    try {
+      setRunningMonitorId(monitorId)
+      await api.triggerMonitorRun(monitorId)
+      await fetchData()
+    } catch (err: any) {
+      alert(err?.message || "Failed to trigger monitor run.")
+    } finally {
+      setRunningMonitorId(null)
     }
   }
 
@@ -377,6 +391,20 @@ export function MonitorsPage() {
 
                       <TableCell className="py-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          <Button
+                            variant="outline"
+                            size="xs"
+                            disabled={runningMonitorId === mon.id}
+                            onClick={() => handleRunNow(mon.id)}
+                            className="gap-1 text-primary hover:text-primary"
+                            title="Run monitor now"
+                          >
+                            <HugeiconsIcon
+                              icon={PlayIcon}
+                              className={`size-3 ${runningMonitorId === mon.id ? "animate-spin" : ""}`}
+                            />
+                            <span>{runningMonitorId === mon.id ? "..." : "Run"}</span>
+                          </Button>
                           <Link
                             to={`/monitors/${mon.id}`}
                             className={buttonVariants({

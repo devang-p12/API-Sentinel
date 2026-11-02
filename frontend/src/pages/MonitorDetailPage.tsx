@@ -126,7 +126,21 @@ export function MonitorDetailPage() {
     try {
       setIsRunningManual(true)
       const triggerTime = Date.now()
-      await api.triggerMonitorRun(monitor.id)
+      const res = await api.triggerMonitorRun(monitor.id)
+
+      if (res?.execution) {
+        const newest = res.execution
+        const isSuccess = newest.status === "SUCCESS" || Boolean(newest.success)
+        setRunPillResult({
+          success: isSuccess,
+          statusCode: newest.statusCode ?? null,
+          durationMs: newest.durationMs ?? newest.latencyMs ?? newest.responseTimeMs ?? 0,
+          errorType: newest.errorType ?? (newest.status !== "SUCCESS" ? newest.status : null),
+        })
+        await fetchExecutions(monitor.id)
+        setIsRunningManual(false)
+        return
+      }
 
       // Poll every 350ms to detect the new execution result
       let attempts = 0

@@ -24,6 +24,7 @@ const MAX_ATTEMPTS = 4;
 export class NotificationDeliveryWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(NotificationDeliveryWorker.name);
   private worker: Worker;
+  private workerConnection: Redis;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -37,16 +38,26 @@ export class NotificationDeliveryWorker implements OnModuleInit, OnModuleDestroy
   ) {}
 
   onModuleInit() {
+    // BullMQ requires dedicated connection for workers due to blocking commands
+    this.workerConnection = this.redisConnection.duplicate();
+    this.workerConnection.on('error', (err) => {
+      this.logger.warn(`NotificationDeliveryWorker Redis socket event: ${err.message}`);
+    });
+
     this.worker = new Worker(
       NOTIFICATION_QUEUE,
       async (job: Job<{ deliveryId: string }>) => {
         return this.processDelivery(job.data.deliveryId);
       },
       {
-        connection: this.redisConnection,
+        connection: this.workerConnection,
         concurrency: 5,
       },
     );
+
+    this.worker.on('error', (err) => {
+      this.logger.error(`[NotificationWorker] Worker error: ${err.message}`, err.stack);
+    });
 
     this.worker.on('failed', (job, err) => {
       this.logger.error(
@@ -61,6 +72,13 @@ export class NotificationDeliveryWorker implements OnModuleInit, OnModuleDestroy
   async onModuleDestroy() {
     if (this.worker) {
       await this.worker.close();
+    }
+    if (this.workerConnection) {
+      try {
+        await this.workerConnection.quit();
+      } catch {
+        this.workerConnection.disconnect();
+      }
     }
   }
 

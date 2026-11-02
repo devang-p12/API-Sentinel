@@ -937,7 +937,7 @@ export const api = {
   disableMonitor: (id: string) =>
     fetchJson<Monitor>(`/monitors/${id}/disable`, { method: 'POST' }),
   triggerMonitorRun: (id: string) =>
-    fetchJson<{ message: string; monitorId: string; queued: boolean; timestamp: string }>(`/monitors/${id}/run`, { method: 'POST' }),
+    fetchJson<{ message: string; monitorId: string; queued: boolean; executed?: boolean; execution?: any; timestamp: string }>(`/monitors/${id}/run`, { method: 'POST' }),
   getMonitorExecutions: (
     id: string,
     optionsOrLimit: number | { limit?: number; offset?: number; from?: string; to?: string; status?: string } = 30

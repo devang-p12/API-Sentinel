@@ -1,6 +1,7 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnApplicationBootstrap, Optional } from '@nestjs/common';
 import { Queue } from 'bullmq';
 import { MONITOR_BULL_QUEUE } from '../../queue/queue.constants';
+import { PrismaService } from '../../prisma/prisma.service';
 
 export interface MonitorScheduleConfig {
   id: string;
@@ -22,10 +23,35 @@ export interface MonitorJobData {
 }
 
 @Injectable()
-export class MonitorSchedulerService {
+export class MonitorSchedulerService implements OnApplicationBootstrap {
   private readonly logger = new Logger(MonitorSchedulerService.name);
 
-  constructor(@Inject(MONITOR_BULL_QUEUE) private readonly monitorQueue: Queue) {}
+  constructor(
+    @Inject(MONITOR_BULL_QUEUE) private readonly monitorQueue: Queue,
+    @Optional() private readonly prisma?: PrismaService,
+  ) {}
+
+  async onApplicationBootstrap() {
+    if (!this.prisma) return;
+    try {
+      const activeMonitors = await this.prisma.monitor.findMany({
+        where: { isActive: true },
+      });
+      for (const mon of activeMonitors) {
+        await this.scheduleMonitor({
+          id: mon.id,
+          organizationId: mon.organizationId,
+          apiId: mon.apiId,
+          environmentId: mon.environmentId,
+          intervalSeconds: mon.intervalSeconds,
+          isActive: true,
+        });
+      }
+      this.logger.log(`[MonitorScheduler] Synchronized ${activeMonitors.length} active monitors into BullMQ schedule.`);
+    } catch (err: any) {
+      this.logger.warn(`[MonitorScheduler] Could not synchronize active monitors on bootstrap: ${err.message}`);
+    }
+  }
 
   /**
    * Schedules a recurring monitor job in BullMQ.

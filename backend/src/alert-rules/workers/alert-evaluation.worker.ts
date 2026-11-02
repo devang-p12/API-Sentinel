@@ -9,6 +9,7 @@ import { AlertEvaluationService } from '../services/alert-evaluation.service';
 export class AlertEvaluationWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AlertEvaluationWorker.name);
   private worker: Worker;
+  private workerConnection: Redis;
 
   constructor(
     @Inject(REDIS_CONNECTION) private readonly redisConnection: Redis,
@@ -18,13 +19,19 @@ export class AlertEvaluationWorker implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     const concurrency = parseInt(process.env.ALERT_WORKER_CONCURRENCY || '5', 10);
 
+    // BullMQ requires dedicated connection for workers due to blocking commands
+    this.workerConnection = this.redisConnection.duplicate();
+    this.workerConnection.on('error', (err) => {
+      this.logger.warn(`AlertEvaluationWorker Redis socket event: ${err.message}`);
+    });
+
     this.worker = new Worker(
       ALERT_EVALUATION_QUEUE,
       async (job: Job) => {
         return this.process(job);
       },
       {
-        connection: this.redisConnection,
+        connection: this.workerConnection,
         concurrency,
       },
     );
@@ -57,6 +64,13 @@ export class AlertEvaluationWorker implements OnModuleInit, OnModuleDestroy {
     if (this.worker) {
       await this.worker.close();
       this.logger.log('AlertEvaluationWorker closed gracefully.');
+    }
+    if (this.workerConnection) {
+      try {
+        await this.workerConnection.quit();
+      } catch {
+        this.workerConnection.disconnect();
+      }
     }
   }
 }
