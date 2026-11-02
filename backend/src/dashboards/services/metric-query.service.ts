@@ -462,7 +462,16 @@ export class MetricQueryService {
     }
 
     if (filters?.environmentId) {
-      where.environmentId = filters.environmentId;
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(filters.environmentId);
+      if (isUuid) {
+        where.environmentId = filters.environmentId;
+      } else {
+        // Common environment across services (e.g. "Production", "Staging", "Development", "UAT")
+        where.environment = {
+          ...(where.environment || {}),
+          name: { equals: filters.environmentId, mode: 'insensitive' },
+        };
+      }
     }
 
     if (filters?.monitorId) {
@@ -475,7 +484,17 @@ export class MetricQueryService {
     const configWhere: any = {};
     if (filters?.organizationId) configWhere.organizationId = filters.organizationId;
     if (filters?.apiId) configWhere.apiId = filters.apiId;
-    if (filters?.environmentId) configWhere.environmentId = filters.environmentId;
+    if (filters?.environmentId) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(filters.environmentId);
+      if (isUuid) {
+        configWhere.environmentId = filters.environmentId;
+      } else {
+        configWhere.environment = {
+          ...(configWhere.environment || {}),
+          name: { equals: filters.environmentId, mode: 'insensitive' },
+        };
+      }
+    }
     if (filters?.monitorId) configWhere.id = filters.monitorId;
 
     const configs = await this.prisma.monitorConfig.findMany({ where: configWhere });

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   api,
   type AlertRule,
@@ -203,6 +203,25 @@ export function CreateAlertRuleSheet({
     }
   };
 
+  const availableEnvironments = useMemo(() => {
+    if (apiId) {
+      return environments
+        .filter((e) => e.apiId === apiId)
+        .map((e) => ({ value: e.id, label: e.name }));
+    }
+    const seen = new Set<string>();
+    const list: Array<{ value: string; label: string }> = [];
+    for (const env of environments) {
+      const name = env.name.trim();
+      const key = name.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push({ value: name, label: name });
+      }
+    }
+    return list;
+  }, [environments, apiId]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
@@ -345,9 +364,9 @@ export function CreateAlertRuleSheet({
                   className="w-full h-8 px-2 bg-background border border-border text-foreground rounded text-xs"
                 >
                   <option value="">All Environments</option>
-                  {environments.map((env) => (
-                    <option key={env.id} value={env.id}>
-                      {env.name}
+                  {availableEnvironments.map((env) => (
+                    <option key={env.value} value={env.value}>
+                      {env.label}
                     </option>
                   ))}
                 </select>
@@ -362,11 +381,15 @@ export function CreateAlertRuleSheet({
                 >
                   <option value="">All Monitors</option>
                   {monitors
-                    .filter(
-                      (m) =>
-                        (!apiId || (m.environment as any)?.apiId === apiId || m.environment?.api?.id === apiId) &&
-                        (!environmentId || m.environmentId === environmentId),
-                    )
+                    .filter((m) => {
+                      if (apiId && (m.environment as any)?.apiId !== apiId && m.environment?.api?.id !== apiId) return false;
+                      if (environmentId) {
+                        const matchesEnvId = m.environmentId === environmentId || m.environment?.id === environmentId;
+                        const matchesEnvName = m.environment?.name?.toLowerCase() === environmentId.toLowerCase();
+                        if (!matchesEnvId && !matchesEnvName) return false;
+                      }
+                      return true;
+                    })
                     .map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.name}

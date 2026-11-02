@@ -50,9 +50,32 @@ export function ScopeSelector({
     return environments;
   }, [environments, apiId, projectId, filteredApis]);
 
+  const environmentOptions = useMemo(() => {
+    if (apiId) {
+      return filteredEnvironments.map((e) => ({ value: e.id, label: e.name }));
+    }
+    const seen = new Set<string>();
+    const list: Array<{ value: string; label: string }> = [];
+    for (const env of filteredEnvironments) {
+      const name = env.name.trim();
+      const key = name.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push({ value: name, label: name });
+      }
+    }
+    return list;
+  }, [filteredEnvironments, apiId]);
+
   const filteredMonitors = useMemo(() => {
     if (environmentId) {
-      return monitors.filter((m) => m.environmentId === environmentId);
+      return monitors.filter((m) => {
+        const matchesEnvId = m.environmentId === environmentId || m.environment?.id === environmentId;
+        const matchesEnvName = m.environment?.name?.toLowerCase() === environmentId.toLowerCase();
+        if (!matchesEnvId && !matchesEnvName) return false;
+        if (apiId && m.environment?.apiId !== apiId && m.environment?.api?.id !== apiId) return false;
+        return true;
+      });
     }
     if (apiId) {
       const envIds = new Set(filteredEnvironments.map((e) => e.id));
@@ -166,9 +189,9 @@ export function ScopeSelector({
               className="w-full h-8 px-2.5 text-xs bg-background border border-border rounded-md font-mono focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <option value="">All Environments</option>
-              {filteredEnvironments.map((env) => (
-                <option key={env.id} value={env.id}>
-                  {env.name}
+              {environmentOptions.map((env) => (
+                <option key={env.value} value={env.value}>
+                  {env.label}
                 </option>
               ))}
             </select>

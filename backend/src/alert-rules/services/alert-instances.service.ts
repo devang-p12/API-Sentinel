@@ -29,7 +29,17 @@ export class AlertInstancesService {
     }
 
     if (query.environmentId) {
-      where.alertRule = { ...(where.alertRule || {}), environmentId: query.environmentId };
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(query.environmentId);
+      if (isUuid) {
+        where.alertRule = { ...(where.alertRule || {}), environmentId: query.environmentId };
+      } else {
+        where.alertRule = {
+          ...(where.alertRule || {}),
+          environment: {
+            name: { equals: query.environmentId, mode: 'insensitive' },
+          },
+        };
+      }
     }
 
     if (query.monitorId) {

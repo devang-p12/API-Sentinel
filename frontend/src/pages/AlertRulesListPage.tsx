@@ -122,7 +122,13 @@ export function AlertRulesListPage() {
       if (projectFilter !== 'ALL' && rule.projectId !== projectFilter) return false;
 
       // Environment
-      if (environmentFilter !== 'ALL' && rule.environmentId !== environmentFilter) return false;
+      if (environmentFilter !== 'ALL') {
+        const matchEnv =
+          rule.environmentId === environmentFilter ||
+          rule.environment?.name?.toLowerCase() === environmentFilter.toLowerCase() ||
+          rule.environment?.id === environmentFilter;
+        if (!matchEnv) return false;
+      }
 
       // Metric
       if (metricFilter !== 'ALL' && rule.metric !== metricFilter) return false;
@@ -130,6 +136,21 @@ export function AlertRulesListPage() {
       return true;
     });
   }, [rules, searchQuery, statusFilter, severityFilter, projectFilter, environmentFilter, metricFilter]);
+
+  // Deduplicated common environments across all services
+  const commonEnvironments = useMemo(() => {
+    const seen = new Set<string>();
+    const list: Array<{ value: string; label: string }> = [];
+    for (const env of environments) {
+      const name = env.name.trim();
+      const key = name.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push({ value: name, label: name });
+      }
+    }
+    return list;
+  }, [environments]);
 
   // Status counters
   const counts = useMemo(() => {
@@ -502,9 +523,9 @@ export function AlertRulesListPage() {
                 className="w-full h-7 px-2 bg-background border border-border text-foreground font-mono text-xs rounded-none focus:outline-none focus:ring-1 focus:ring-primary"
               >
                 <option value="ALL">All Environments</option>
-                {environments.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.name}
+                {commonEnvironments.map((e) => (
+                  <option key={e.value} value={e.value}>
+                    {e.label}
                   </option>
                 ))}
               </select>

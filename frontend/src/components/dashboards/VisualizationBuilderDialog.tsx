@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent } from 'react';
+import { useState, useEffect, useMemo, type FormEvent } from 'react';
 import {
   api,
   type MetricDefinition,
@@ -204,10 +204,34 @@ export function VisualizationBuilderDialog({
   };
 
   // Filtered environment / monitors based on selections
-  const availableEnvironments = environments.filter((e) => !apiId || e.apiId === apiId);
-  const availableMonitors = monitors.filter(
-    (m) => (!environmentId || m.environmentId === environmentId) && (!apiId || m.environment?.apiId === apiId),
-  );
+  const availableEnvironments = useMemo(() => {
+    if (apiId) {
+      return environments
+        .filter((e) => e.apiId === apiId)
+        .map((e) => ({ value: e.id, label: e.name }));
+    }
+    const seen = new Set<string>();
+    const list: Array<{ value: string; label: string }> = [];
+    for (const env of environments) {
+      const name = env.name.trim();
+      const key = name.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push({ value: name, label: name });
+      }
+    }
+    return list;
+  }, [environments, apiId]);
+
+  const availableMonitors = monitors.filter((m) => {
+    if (apiId && m.environment?.apiId !== apiId && m.environment?.api?.id !== apiId) return false;
+    if (environmentId) {
+      const matchesEnvId = m.environmentId === environmentId || m.environment?.id === environmentId;
+      const matchesEnvName = m.environment?.name?.toLowerCase() === environmentId.toLowerCase();
+      if (!matchesEnvId && !matchesEnvName) return false;
+    }
+    return true;
+  });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -334,8 +358,8 @@ export function VisualizationBuilderDialog({
                     >
                       <option value="">All Environments</option>
                       {availableEnvironments.map((env) => (
-                        <option key={env.id} value={env.id}>
-                          {env.name}
+                        <option key={env.value} value={env.value}>
+                          {env.label}
                         </option>
                       ))}
                     </select>

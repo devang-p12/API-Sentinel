@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import type { Api, Environment } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -52,9 +53,25 @@ export function DashboardHeader({
   onToggleEditMode,
   onOpenAddDrawer,
 }: DashboardHeaderProps) {
-  const filteredEnvironments = environments.filter(
-    (env) => !selectedApiId || env.apiId === selectedApiId,
-  );
+  const environmentOptions = useMemo(() => {
+    if (selectedApiId) {
+      return environments
+        .filter((env) => env.apiId === selectedApiId)
+        .map((env) => ({ value: env.id, label: env.name }));
+    }
+    // Deduplicate common basic environments across all services/projects
+    const seen = new Set<string>();
+    const list: Array<{ value: string; label: string }> = [];
+    for (const env of environments) {
+      const name = env.name.trim();
+      const key = name.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push({ value: name, label: name });
+      }
+    }
+    return list;
+  }, [environments, selectedApiId]);
 
   return (
     <div className="border-b border-border bg-card/40 backdrop-blur-md px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
@@ -127,9 +144,9 @@ export function DashboardHeader({
             title="Filter by Environment"
           >
             <option value="">All Environments</option>
-            {filteredEnvironments.map((env) => (
-              <option key={env.id} value={env.id}>
-                {env.name}
+            {environmentOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
               </option>
             ))}
           </select>

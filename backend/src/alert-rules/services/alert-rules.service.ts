@@ -219,7 +219,16 @@ export class AlertRulesService {
 
     if (query.projectId) where.projectId = query.projectId;
     if (query.apiId) where.apiId = query.apiId;
-    if (query.environmentId) where.environmentId = query.environmentId;
+    if (query.environmentId) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(query.environmentId);
+      if (isUuid) {
+        where.environmentId = query.environmentId;
+      } else {
+        where.environment = {
+          name: { equals: query.environmentId, mode: 'insensitive' },
+        };
+      }
+    }
     if (query.monitorId) where.monitorId = query.monitorId;
     if (query.metric) where.metric = query.metric;
     if (query.enabled !== undefined) {

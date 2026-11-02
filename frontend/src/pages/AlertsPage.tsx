@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   api,
   type AlertRule,
@@ -162,12 +162,33 @@ export function AlertsPage() {
     }
   };
 
+  const commonEnvironments = useMemo(() => {
+    const seen = new Set<string>();
+    const list: Array<{ value: string; label: string }> = [];
+    for (const env of environments) {
+      if (apiFilter !== 'ALL' && env.apiId !== apiFilter) continue;
+      const name = env.name.trim();
+      const key = name.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push({ value: name, label: name });
+      }
+    }
+    return list;
+  }, [environments, apiFilter]);
+
   // Filter instances
   const filteredInstances = instances.filter((inst) => {
     if (statusFilter !== 'ALL' && inst.status !== statusFilter) return false;
     if (severityFilter !== 'ALL' && inst.alertRule?.severity !== severityFilter) return false;
     if (apiFilter !== 'ALL' && inst.alertRule?.apiId !== apiFilter) return false;
-    if (environmentFilter !== 'ALL' && inst.alertRule?.environmentId !== environmentFilter) return false;
+    if (environmentFilter !== 'ALL') {
+      const matchEnv =
+        inst.alertRule?.environmentId === environmentFilter ||
+        inst.alertRule?.environment?.name?.toLowerCase() === environmentFilter.toLowerCase() ||
+        inst.alertRule?.environment?.id === environmentFilter;
+      if (!matchEnv) return false;
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const matchName = inst.alertRule?.name?.toLowerCase().includes(q);
@@ -182,7 +203,13 @@ export function AlertsPage() {
   // Filter rules
   const filteredRules = rules.filter((rule) => {
     if (apiFilter !== 'ALL' && rule.apiId !== apiFilter) return false;
-    if (environmentFilter !== 'ALL' && rule.environmentId !== environmentFilter) return false;
+    if (environmentFilter !== 'ALL') {
+      const matchEnv =
+        rule.environmentId === environmentFilter ||
+        rule.environment?.name?.toLowerCase() === environmentFilter.toLowerCase() ||
+        rule.environment?.id === environmentFilter;
+      if (!matchEnv) return false;
+    }
     if (severityFilter !== 'ALL' && rule.severity !== severityFilter) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -476,9 +503,9 @@ export function AlertsPage() {
               className="h-8 px-2 bg-background border border-border text-foreground text-xs rounded-none font-mono"
             >
               <option value="ALL">All Envs</option>
-              {environments.map((env) => (
-                <option key={env.id} value={env.id}>
-                  {env.name}
+              {commonEnvironments.map((env) => (
+                <option key={env.value} value={env.value}>
+                  {env.label}
                 </option>
               ))}
             </select>
