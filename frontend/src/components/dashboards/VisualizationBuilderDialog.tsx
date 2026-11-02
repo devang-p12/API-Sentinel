@@ -28,6 +28,7 @@ import {
   DashboardSpeed01Icon,
   ViewIcon,
   RefreshIcon,
+  CircleLock02Icon,
 } from '@hugeicons/core-free-icons';
 
 interface VisualizationBuilderDialogProps {
@@ -179,6 +180,9 @@ export function VisualizationBuilderDialog({
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!currentMetricDef?.supportedVisualizations.includes(visualizationType as any)) {
+      return;
+    }
     const finalTitle = title.trim() || currentMetricDef?.name || 'Custom Metric';
     setIsSubmitting(true);
     try {
@@ -394,23 +398,25 @@ export function VisualizationBuilderDialog({
                     { id: 'gauge', label: 'Gauge', icon: ViewIcon },
                     { id: 'table', label: 'Table', icon: Table01Icon },
                   ].map((v) => {
-                    const isSupported = currentMetricDef?.supportedVisualizations.includes(v.id as any);
+                    const isSupported = Boolean(currentMetricDef?.supportedVisualizations.includes(v.id as any));
                     const isSelected = visualizationType === v.id;
                     return (
                       <button
                         type="button"
                         key={v.id}
-                        onClick={() => setVisualizationType(v.id)}
+                        disabled={!isSupported}
+                        onClick={() => isSupported && setVisualizationType(v.id)}
                         className={`p-2 flex flex-col items-center justify-center gap-1.5 border rounded-none text-center transition-all ${
                           isSelected
                             ? 'border-primary bg-primary/10 text-primary font-semibold ring-1 ring-primary'
                             : isSupported
-                            ? 'border-border bg-card hover:bg-muted/40 text-foreground'
-                            : 'border-border/40 opacity-40 hover:opacity-70 text-muted-foreground'
+                            ? 'border-border bg-card hover:bg-muted/40 text-foreground cursor-pointer'
+                            : 'border-border/30 bg-muted/20 opacity-30 text-muted-foreground cursor-not-allowed'
                         }`}
+                        title={!isSupported ? `Locked: not supported for ${currentMetricDef?.name || 'this metric'}` : v.label}
                       >
-                        <HugeiconsIcon icon={v.icon} className="size-4" />
-                        <span className="text-[10px] font-mono leading-none">{v.label}</span>
+                        <HugeiconsIcon icon={!isSupported ? CircleLock02Icon : v.icon} className="size-4" />
+                        <span className="text-[10px] font-mono leading-none">{!isSupported ? 'Locked' : v.label}</span>
                       </button>
                     );
                   })}
@@ -530,7 +536,12 @@ export function VisualizationBuilderDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" size="sm" disabled={isSubmitting} className="gap-1.5 font-medium">
+            <Button
+              type="submit"
+              size="sm"
+              disabled={isSubmitting || !currentMetricDef?.supportedVisualizations.includes(visualizationType as any)}
+              className="gap-1.5 font-medium"
+            >
               <span>{initialWidget ? 'Save Visualization' : 'Add to Dashboard'}</span>
             </Button>
           </DialogFooter>

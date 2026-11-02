@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import type {
   MetricDefinition,
   Api,
@@ -19,6 +19,12 @@ import {
   ArrowRight01Icon,
   Tick02Icon,
   Settings02Icon,
+  DashboardSpeed01Icon,
+  ChartLineData01Icon,
+  PieChartIcon,
+  ViewIcon,
+  Table01Icon,
+  CircleLock02Icon,
 } from '@hugeicons/core-free-icons';
 
 interface QueryPaneProps {
@@ -26,9 +32,9 @@ interface QueryPaneProps {
   isCollapsed: boolean;
   height: number;
   catalog: MetricDefinition[];
-  apis: Api[];
-  environments: Environment[];
-  monitors: Monitor[];
+  apis?: Api[];
+  environments?: Environment[];
+  monitors?: Monitor[];
   activeWidget: DashboardWidget | null;
   draftWidget: Partial<DashboardWidget> | null;
   onResize: (delta: number) => void;
@@ -45,14 +51,19 @@ interface QueryPaneProps {
   onChangeDraft: (draft: Partial<DashboardWidget>) => void;
 }
 
+const VISUALIZATION_TYPES = [
+  { id: 'stat', label: 'Stat', icon: DashboardSpeed01Icon },
+  { id: 'time_series', label: 'Time Series', icon: ChartLineData01Icon },
+  { id: 'bar', label: 'Bar Chart', icon: PieChartIcon },
+  { id: 'gauge', label: 'Gauge', icon: ViewIcon },
+  { id: 'table', label: 'Table', icon: Table01Icon },
+] as const;
+
 export function QueryPane({
   isOpen,
   isCollapsed,
   height,
   catalog,
-  apis,
-  environments,
-  monitors,
   activeWidget,
   draftWidget,
   onResize,
@@ -61,7 +72,6 @@ export function QueryPane({
   onSaveWidget,
   onChangeDraft,
 }: QueryPaneProps) {
-  // Local state for configuration
   const currentItem = activeWidget || draftWidget;
   const currentConfig = (currentItem?.configuration as Record<string, any>) || {};
 
@@ -70,94 +80,139 @@ export function QueryPane({
   const [visualizationType, setVisualizationType] = useState<'stat' | 'time_series' | 'bar' | 'table' | 'gauge'>(
     (currentItem?.visualizationType as any) || 'stat'
   );
-  const [apiId, setApiId] = useState(currentConfig.apiId || '');
-  const [environmentId, setEnvironmentId] = useState(currentConfig.environmentId || '');
-  const [monitorId, setMonitorId] = useState(currentConfig.monitorId || '');
-  const [timeRange, setTimeRange] = useState(currentConfig.timeRange || '24h');
   const [width, setWidth] = useState(currentItem?.width || 6);
   const [rowSpan, setRowSpan] = useState(currentItem?.height || 3);
   const [newRow, setNewRow] = useState(Boolean(currentConfig.newRow));
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Sync state whenever active or draft widget changes
   useEffect(() => {
     if (currentItem) {
+      const currentMetric = currentItem.metric || 'availability';
+      const metricDef = catalog.find((m) => m.id === currentMetric);
+      let initialViz = (currentItem.visualizationType as any) || 'stat';
+
+      // If existing visualization is not supported, lock and fallback to default
+      if (metricDef && !metricDef.supportedVisualizations.includes(initialViz)) {
+        initialViz = metricDef.defaultVisualization;
+      }
+
       setTitle(currentItem.title || '');
-      setMetric(currentItem.metric || 'availability');
-      setVisualizationType((currentItem.visualizationType as any) || 'stat');
-      const conf = (currentItem.configuration as Record<string, any>) || {};
-      setApiId(conf.apiId || '');
-      setEnvironmentId(conf.environmentId || '');
-      setMonitorId(conf.monitorId || '');
-      setTimeRange(conf.timeRange || '24h');
+      setMetric(currentMetric);
+      setVisualizationType(initialViz);
       setWidth(currentItem.width || 6);
       setRowSpan(currentItem.height || 3);
+      const conf = (currentItem.configuration as Record<string, any>) || {};
       setNewRow(Boolean(conf.newRow));
     }
-  }, [currentItem]);
+  }, [currentItem, catalog]);
 
-  // Sync draft changes immediately to parent
-  const handleFieldChange = (updates: Partial<{
-    title: string;
-    metric: string;
-    visualizationType: 'stat' | 'time_series' | 'bar' | 'table' | 'gauge';
-    apiId: string;
-    environmentId: string;
-    monitorId: string;
-    timeRange: string;
-    width: number;
-    rowSpan: number;
-    newRow: boolean;
-  }>) => {
-    const nextMetric = updates.metric ?? metric;
-    const nextViz = updates.visualizationType ?? visualizationType;
-    const nextTitle = updates.title ?? title;
-    const nextApiId = updates.apiId !== undefined ? updates.apiId : apiId;
-    const nextEnvId = updates.environmentId !== undefined ? updates.environmentId : environmentId;
-    const nextMonId = updates.monitorId !== undefined ? updates.monitorId : monitorId;
-    const nextTime = updates.timeRange ?? timeRange;
-    const nextWidth = updates.width ?? width;
-    const nextRowSpan = updates.rowSpan !== undefined ? updates.rowSpan : rowSpan;
-    const nextNewRow = updates.newRow !== undefined ? updates.newRow : newRow;
+  const currentMetricDef = catalog.find((m) => m.id === metric);
+  const isCurrentVizSupported = Boolean(
+    currentMetricDef?.supportedVisualizations.includes(visualizationType)
+  );
 
-    if (updates.metric !== undefined) setMetric(updates.metric);
-    if (updates.visualizationType !== undefined) setVisualizationType(updates.visualizationType);
-    if (updates.title !== undefined) setTitle(updates.title);
-    if (updates.apiId !== undefined) setApiId(updates.apiId);
-    if (updates.environmentId !== undefined) setEnvironmentId(updates.environmentId);
-    if (updates.monitorId !== undefined) setMonitorId(updates.monitorId);
-    if (updates.timeRange !== undefined) setTimeRange(updates.timeRange);
-    if (updates.width !== undefined) setWidth(updates.width);
-    if (updates.rowSpan !== undefined) setRowSpan(updates.rowSpan);
-    if (updates.newRow !== undefined) setNewRow(updates.newRow);
+  const handleMetricChange = (newMetricId: string) => {
+    const newDef = catalog.find((m) => m.id === newMetricId);
+    let nextViz = visualizationType;
+
+    // If new metric does not support currently selected visualization, automatically switch to its default
+    if (newDef && !newDef.supportedVisualizations.includes(nextViz)) {
+      nextViz = newDef.defaultVisualization;
+    }
+
+    setMetric(newMetricId);
+    setVisualizationType(nextViz);
 
     onChangeDraft({
-      title: nextTitle,
-      metric: nextMetric,
-      visualizationType: nextViz as any,
-      configuration: {
-        apiId: nextApiId || undefined,
-        environmentId: nextEnvId || undefined,
-        monitorId: nextMonId || undefined,
-        timeRange: nextTime,
-        newRow: nextNewRow,
-      },
-      width: nextWidth,
-      height: nextRowSpan,
+      title,
+      metric: newMetricId,
+      visualizationType: nextViz,
+      configuration: { newRow },
+      width,
+      height: rowSpan,
+    });
+  };
+
+  const handleVizChange = (type: 'stat' | 'time_series' | 'bar' | 'table' | 'gauge') => {
+    if (!currentMetricDef?.supportedVisualizations.includes(type)) {
+      // Locked: unsupported visualization form
+      return;
+    }
+    setVisualizationType(type);
+
+    onChangeDraft({
+      title,
+      metric,
+      visualizationType: type,
+      configuration: { newRow },
+      width,
+      height: rowSpan,
+    });
+  };
+
+  const handleTitleChange = (newTitle: string) => {
+    setTitle(newTitle);
+    onChangeDraft({
+      title: newTitle,
+      metric,
+      visualizationType,
+      configuration: { newRow },
+      width,
+      height: rowSpan,
+    });
+  };
+
+  const handleWidthChange = (newWidth: number) => {
+    const clamped = Math.max(3, Math.min(12, newWidth));
+    setWidth(clamped);
+    onChangeDraft({
+      title,
+      metric,
+      visualizationType,
+      configuration: { newRow },
+      width: clamped,
+      height: rowSpan,
+    });
+  };
+
+  const handleRowSpanChange = (newRowSpan: number) => {
+    const clamped = Math.max(2, Math.min(8, newRowSpan));
+    setRowSpan(clamped);
+    onChangeDraft({
+      title,
+      metric,
+      visualizationType,
+      configuration: { newRow },
+      width,
+      height: clamped,
+    });
+  };
+
+  const handleNewRowToggle = () => {
+    const updated = !newRow;
+    setNewRow(updated);
+    onChangeDraft({
+      title,
+      metric,
+      visualizationType,
+      configuration: { newRow: updated },
+      width,
+      height: rowSpan,
     });
   };
 
   const handleApply = async () => {
+    if (!isCurrentVizSupported) {
+      return;
+    }
     setIsSubmitting(true);
     try {
       await onSaveWidget({
-        title: title.trim() || catalog.find((m) => m.id === metric)?.name || 'Custom Panel',
+        title: title.trim() || currentMetricDef?.name || 'Custom Panel',
         metric,
         visualizationType,
         configuration: {
-          apiId: apiId || undefined,
-          environmentId: environmentId || undefined,
-          monitorId: monitorId || undefined,
-          timeRange,
           newRow,
         },
         width,
@@ -170,37 +225,6 @@ export function QueryPane({
       setIsSubmitting(false);
     }
   };
-
-  const availableEnvironments = useMemo(() => {
-    if (apiId) {
-      return environments
-        .filter((e) => e.apiId === apiId)
-        .map((e) => ({ value: e.id, label: e.name }));
-    }
-    const seen = new Set<string>();
-    const list: Array<{ value: string; label: string }> = [];
-    for (const env of environments) {
-      const name = env.name.trim();
-      const key = name.toLowerCase();
-      if (!seen.has(key)) {
-        seen.add(key);
-        list.push({ value: name, label: name });
-      }
-    }
-    return list;
-  }, [environments, apiId]);
-
-  const availableMonitors = monitors.filter((m) => {
-    if (apiId && m.environment?.apiId !== apiId && m.environment?.api?.id !== apiId) return false;
-    if (environmentId) {
-      const matchesEnvId = m.environmentId === environmentId || m.environment?.id === environmentId;
-      const matchesEnvName = m.environment?.name?.toLowerCase() === environmentId.toLowerCase();
-      if (!matchesEnvId && !matchesEnvName) return false;
-    }
-    return true;
-  });
-
-  const currentMetricDef = catalog.find((m) => m.id === metric);
 
   if (!isOpen) return null;
 
@@ -225,7 +249,7 @@ export function QueryPane({
       <div className="h-9 px-4 border-b border-border flex items-center justify-between shrink-0 bg-muted/30 text-xs">
         <div className="flex items-center gap-2 font-mono">
           <HugeiconsIcon icon={Settings02Icon} className="size-3.5 text-primary" />
-          <span className="font-semibold text-foreground">Query & Metric Configuration</span>
+          <span className="font-semibold text-foreground">Visualization & Layout Configuration</span>
           {activeWidget && (
             <Badge variant="outline" className="text-[10px] py-0 px-1 font-mono">
               Editing: {activeWidget.title}
@@ -263,24 +287,33 @@ export function QueryPane({
       {/* Expanded Pane Body */}
       {!isCollapsed && (
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 gap-3 text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 text-xs">
             {/* Panel Title */}
-            <div className="space-y-1">
-              <label className="font-semibold text-foreground text-[11px]">Title</label>
+            <div className="md:col-span-3 space-y-1">
+              <label className="font-semibold text-foreground text-[11px] uppercase tracking-wider block">
+                Panel Title
+              </label>
               <Input
                 value={title}
-                onChange={(e) => handleFieldChange({ title: e.target.value })}
+                onChange={(e) => handleTitleChange(e.target.value)}
                 placeholder={currentMetricDef?.name || 'Panel Title'}
                 className="h-8 rounded-none border-input text-xs font-mono"
               />
             </div>
 
             {/* Metric Selector */}
-            <div className="space-y-1">
-              <label className="font-semibold text-foreground text-[11px]">Metric</label>
+            <div className="md:col-span-4 space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="font-semibold text-foreground text-[11px] uppercase tracking-wider">
+                  Metric
+                </label>
+                <span className="text-[10px] font-mono text-muted-foreground">
+                  Unit: {currentMetricDef?.unit || '—'}
+                </span>
+              </div>
               <select
                 value={metric}
-                onChange={(e) => handleFieldChange({ metric: e.target.value })}
+                onChange={(e) => handleMetricChange(e.target.value)}
                 className="w-full h-8 px-2 bg-input/20 border border-input rounded-none text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 {catalog.map((m) => (
@@ -291,84 +324,65 @@ export function QueryPane({
               </select>
             </div>
 
-            {/* API Scope Filter */}
-            <div className="space-y-1">
-              <label className="font-semibold text-foreground text-[11px]">API</label>
-              <select
-                value={apiId}
-                onChange={(e) => handleFieldChange({ apiId: e.target.value, environmentId: '', monitorId: '' })}
-                className="w-full h-8 px-2 bg-input/20 border border-input rounded-none text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="">All APIs</option>
-                {apis.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* Visualization Type Switcher with Strict Lock for Unsupported Types */}
+            <div className="md:col-span-5 space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="font-semibold text-foreground text-[11px] uppercase tracking-wider">
+                  Visualization Type
+                </label>
+                <span className="text-[10px] font-mono text-muted-foreground">
+                  {currentMetricDef?.supportedVisualizations.length} format{currentMetricDef && currentMetricDef.supportedVisualizations.length > 1 ? 's' : ''} supported
+                </span>
+              </div>
 
-            {/* Environment Filter */}
-            <div className="space-y-1">
-              <label className="font-semibold text-foreground text-[11px]">Environment</label>
-              <select
-                value={environmentId}
-                onChange={(e) => handleFieldChange({ environmentId: e.target.value, monitorId: '' })}
-                className="w-full h-8 px-2 bg-input/20 border border-input rounded-none text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="">All Environments</option>
-                {availableEnvironments.map((env) => (
-                  <option key={env.value} value={env.value}>
-                    {env.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+              <div className="grid grid-cols-5 gap-1">
+                {VISUALIZATION_TYPES.map((v) => {
+                  const isSupported = Boolean(currentMetricDef?.supportedVisualizations.includes(v.id as any));
+                  const isSelected = visualizationType === v.id;
 
-            {/* Monitor Endpoint Filter */}
-            <div className="space-y-1">
-              <label className="font-semibold text-foreground text-[11px]">Monitor</label>
-              <select
-                value={monitorId}
-                onChange={(e) => handleFieldChange({ monitorId: e.target.value })}
-                className="w-full h-8 px-2 bg-input/20 border border-input rounded-none text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="">All Monitors</option>
-                {availableMonitors.map((mon) => (
-                  <option key={mon.id} value={mon.id}>
-                    {mon.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Visualization Type */}
-            <div className="space-y-1">
-              <label className="font-semibold text-foreground text-[11px]">Visualization</label>
-              <select
-                value={visualizationType}
-                onChange={(e) => handleFieldChange({ visualizationType: e.target.value as any })}
-                className="w-full h-8 px-2 bg-input/20 border border-input rounded-none text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-ring uppercase"
-              >
-                <option value="stat">Stat</option>
-                <option value="time_series">Time Series</option>
-                <option value="bar">Bar Chart</option>
-                <option value="gauge">Gauge</option>
-                <option value="table">Table</option>
-              </select>
+                  return (
+                    <button
+                      type="button"
+                      key={v.id}
+                      disabled={!isSupported}
+                      onClick={() => handleVizChange(v.id as any)}
+                      className={`h-8 px-1.5 flex items-center justify-center gap-1.5 border text-xs transition-all ${
+                        isSelected
+                          ? 'border-primary bg-primary/10 text-primary font-semibold ring-1 ring-primary'
+                          : isSupported
+                          ? 'border-input bg-card hover:bg-muted/40 text-foreground cursor-pointer'
+                          : 'border-border/30 bg-muted/20 opacity-30 text-muted-foreground cursor-not-allowed'
+                      }`}
+                      title={
+                        !isSupported
+                          ? `Locked: ${v.label} is not supported for ${currentMetricDef?.name || 'this metric'}`
+                          : v.label
+                      }
+                    >
+                      {!isSupported ? (
+                        <HugeiconsIcon icon={CircleLock02Icon} className="size-3 text-muted-foreground shrink-0" />
+                      ) : (
+                        <HugeiconsIcon icon={v.icon} className="size-3.5 shrink-0" />
+                      )}
+                      <span className="text-[10px] font-mono truncate">{v.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
-          {/* Sizing & Apply Bar */}
+          {/* Sizing, Global Filter Note, and Save Actions */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-border/50 text-xs font-mono">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Width / Grid Columns */}
               <div className="flex items-center gap-1.5">
                 <span className="text-muted-foreground text-[11px]">Width:</span>
                 <div className="flex items-center border border-input bg-input/20">
                   <button
                     type="button"
                     title="Shrink width (← arrow)"
-                    onClick={() => handleFieldChange({ width: Math.max(3, width - 1) })}
+                    onClick={() => handleWidthChange(width - 1)}
                     disabled={width <= 3}
                     className="size-7 flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
                   >
@@ -380,7 +394,7 @@ export function QueryPane({
                   <button
                     type="button"
                     title="Expand width (→ arrow)"
-                    onClick={() => handleFieldChange({ width: Math.min(12, width + 1) })}
+                    onClick={() => handleWidthChange(width + 1)}
                     disabled={width >= 12}
                     className="size-7 flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
                   >
@@ -396,7 +410,7 @@ export function QueryPane({
                   <button
                     type="button"
                     title="Shrink height (↑ arrow)"
-                    onClick={() => handleFieldChange({ rowSpan: Math.max(2, rowSpan - 1) })}
+                    onClick={() => handleRowSpanChange(rowSpan - 1)}
                     disabled={rowSpan <= 2}
                     className="size-7 flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
                   >
@@ -408,7 +422,7 @@ export function QueryPane({
                   <button
                     type="button"
                     title="Expand height (↓ arrow)"
-                    onClick={() => handleFieldChange({ rowSpan: Math.min(8, rowSpan + 1) })}
+                    onClick={() => handleRowSpanChange(rowSpan + 1)}
                     disabled={rowSpan >= 8}
                     className="size-7 flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
                   >
@@ -420,7 +434,7 @@ export function QueryPane({
               {/* Start on New Row */}
               <button
                 type="button"
-                onClick={() => handleFieldChange({ newRow: !newRow })}
+                onClick={handleNewRowToggle}
                 className={`h-7 px-2 border text-xs flex items-center gap-1 transition-colors ${
                   newRow
                     ? 'bg-primary/10 border-primary text-primary font-semibold'
@@ -431,23 +445,14 @@ export function QueryPane({
                 <span>{newRow ? '✓ Starts on New Row' : 'Start on New Row'}</span>
               </button>
 
-              <div className="flex items-center gap-1.5">
-                <span className="text-muted-foreground text-[11px]">Time Window:</span>
-                <select
-                  value={timeRange}
-                  onChange={(e) => handleFieldChange({ timeRange: e.target.value })}
-                  className="h-7 px-2 bg-input/20 border border-input rounded-none text-xs text-foreground"
-                >
-                  <option value="15m">15m</option>
-                  <option value="1h">1h</option>
-                  <option value="6h">6h</option>
-                  <option value="24h">24h</option>
-                  <option value="7d">7d</option>
-                  <option value="30d">30d</option>
-                </select>
+              {/* Minimalistic note explaining header filters */}
+              <div className="hidden lg:flex items-center gap-1 text-[11px] text-muted-foreground/80 pl-2">
+                <span className="size-1 rounded-full bg-emerald-500 inline-block" />
+                <span>Filters (Time Window, Environment, API) apply automatically from header</span>
               </div>
             </div>
 
+            {/* Action Buttons */}
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
@@ -461,8 +466,9 @@ export function QueryPane({
               <Button
                 size="sm"
                 onClick={handleApply}
-                disabled={isSubmitting}
+                disabled={isSubmitting || !isCurrentVizSupported}
                 className="h-7 gap-1 font-medium text-xs"
+                title={!isCurrentVizSupported ? 'Selected visualization form is locked for this metric' : undefined}
               >
                 <HugeiconsIcon icon={Tick02Icon} className="size-3.5" />
                 <span>{activeWidget ? 'Apply Changes' : 'Save Panel'}</span>

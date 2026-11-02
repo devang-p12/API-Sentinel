@@ -21,6 +21,7 @@ import {
   DashboardSpeed01Icon,
   ViewIcon,
   RefreshIcon,
+  CircleLock02Icon,
 } from '@hugeicons/core-free-icons';
 
 interface VisualizationDrawerProps {
@@ -128,17 +129,18 @@ export function VisualizationDrawer({
 
   const handleAddQuickly = async () => {
     if (!currentMetricDef) return;
+    const isSupported = currentMetricDef.supportedVisualizations.includes(selectedVizType);
+    if (!isSupported) {
+      // Locked: cannot create visualization in unsupported form
+      return;
+    }
     setIsSubmitting(true);
     try {
       await onAddWidget({
         title: currentMetricDef.name,
         metric: selectedMetricId,
         visualizationType: selectedVizType,
-        configuration: {
-          apiId: defaultApiId || undefined,
-          environmentId: defaultEnvironmentId || undefined,
-          timeRange,
-        },
+        configuration: {},
         width: selectedVizType === 'time_series' || selectedVizType === 'bar' ? 12 : 6,
         height: 3,
       });
@@ -152,16 +154,15 @@ export function VisualizationDrawer({
 
   const handleOpenBottomConfigure = () => {
     if (!currentMetricDef) return;
+    const isSupported = currentMetricDef.supportedVisualizations.includes(selectedVizType);
+    const vizTypeToUse = isSupported ? selectedVizType : currentMetricDef.defaultVisualization;
+
     onConfigureQuery({
       title: currentMetricDef.name,
       metric: selectedMetricId,
-      visualizationType: selectedVizType,
-      configuration: {
-        apiId: defaultApiId || undefined,
-        environmentId: defaultEnvironmentId || undefined,
-        timeRange,
-      },
-      width: selectedVizType === 'time_series' || selectedVizType === 'bar' ? 12 : 6,
+      visualizationType: vizTypeToUse,
+      configuration: {},
+      width: vizTypeToUse === 'time_series' || vizTypeToUse === 'bar' ? 12 : 6,
       height: 3,
     });
   };
@@ -306,17 +307,19 @@ export function VisualizationDrawer({
                 <button
                   type="button"
                   key={v.id}
-                  onClick={() => setSelectedVizType(v.id as any)}
+                  disabled={!isSupported}
+                  onClick={() => isSupported && setSelectedVizType(v.id as any)}
                   className={`p-1.5 flex flex-col items-center justify-center gap-1 border rounded-none text-center transition-all ${
                     isSelected
                       ? 'border-primary bg-primary/10 text-primary font-semibold ring-1 ring-primary'
                       : isSupported
-                      ? 'border-border bg-card hover:bg-muted/40 text-foreground'
-                      : 'border-border/30 opacity-40 hover:opacity-70 text-muted-foreground'
+                      ? 'border-border bg-card hover:bg-muted/40 text-foreground cursor-pointer'
+                      : 'border-border/30 bg-muted/20 opacity-30 text-muted-foreground cursor-not-allowed'
                   }`}
+                  title={!isSupported ? `Locked: not supported for ${currentMetricDef?.name || 'this metric'}` : v.label}
                 >
-                  <HugeiconsIcon icon={v.icon} className="size-3.5" />
-                  <span className="text-[9px] font-mono leading-none">{v.label}</span>
+                  <HugeiconsIcon icon={!isSupported ? CircleLock02Icon : v.icon} className="size-3.5" />
+                  <span className="text-[9px] font-mono leading-none">{!isSupported ? 'Locked' : v.label}</span>
                 </button>
               );
             })}
@@ -328,7 +331,7 @@ export function VisualizationDrawer({
           <Button
             size="sm"
             onClick={handleAddQuickly}
-            disabled={isSubmitting}
+            disabled={isSubmitting || !currentMetricDef?.supportedVisualizations.includes(selectedVizType)}
             className="h-8 gap-1 font-medium text-xs"
           >
             <HugeiconsIcon icon={Add01Icon} className="size-3.5" />

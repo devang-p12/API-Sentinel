@@ -42,6 +42,13 @@ export function WidgetRenderer({ widget, isLoading }: WidgetRendererProps) {
     case 'table':
       return <TableRenderer data={data} metric={widget.metric} />;
     default:
-      return <StatRenderer data={data} metric={widget.metric} />;
+      return (
+        <div className="flex flex-col items-center justify-center h-full min-h-[140px] text-muted-foreground text-xs p-4 text-center font-mono space-y-1">
+          <span className="text-destructive font-semibold">Visualization Locked</span>
+          <span className="text-[10px] text-muted-foreground">
+            {String(widget.visualizationType)} is not supported for {widget.metric}.
+          </span>
+        </div>
+      );
   }
 }

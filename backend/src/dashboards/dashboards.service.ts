@@ -144,6 +144,12 @@ export class DashboardsService {
       throw new BadRequestException(`Invalid metric: "${dto.metric}". Choose from metric catalog.`);
     }
 
+    if (!metricDef.supportedVisualizations.includes(dto.visualizationType as any)) {
+      throw new BadRequestException(
+        `Visualization "${dto.visualizationType}" is not supported for metric "${dto.metric}". Supported forms: ${metricDef.supportedVisualizations.join(', ')}`,
+      );
+    }
+
     return this.prisma.dashboardWidget.create({
       data: {
         dashboardId,
@@ -175,11 +181,17 @@ export class DashboardsService {
       throw new NotFoundException(`Widget with ID ${widgetId} not found in this dashboard`);
     }
 
-    if (dto.metric) {
-      const metricDef = getMetricDefinition(dto.metric);
-      if (!metricDef) {
-        throw new BadRequestException(`Invalid metric: "${dto.metric}"`);
-      }
+    const effectiveMetric = dto.metric || widget.metric;
+    const effectiveViz = dto.visualizationType || widget.visualizationType;
+    const metricDef = getMetricDefinition(effectiveMetric);
+    if (!metricDef) {
+      throw new BadRequestException(`Invalid metric: "${effectiveMetric}"`);
+    }
+
+    if (!metricDef.supportedVisualizations.includes(effectiveViz as any)) {
+      throw new BadRequestException(
+        `Visualization "${effectiveViz}" is not supported for metric "${effectiveMetric}". Supported forms: ${metricDef.supportedVisualizations.join(', ')}`,
+      );
     }
 
     return this.prisma.dashboardWidget.update({
@@ -265,13 +277,14 @@ export class DashboardsService {
       dashboard.widgets.map(async (w) => {
         const config = (w.configuration as any) || {};
 
-        const effectiveApiId = config.apiId || globalApiId;
-        const effectiveEnvironmentId = config.environmentId || globalEnvironmentId;
-        const effectiveMonitorId = config.monitorId || globalMonitorId;
+        // Global header filters govern the dashboard widgets universally
+        const effectiveApiId = globalApiId || config.apiId;
+        const effectiveEnvironmentId = globalEnvironmentId || config.environmentId;
+        const effectiveMonitorId = globalMonitorId || config.monitorId;
 
         let widgetFrom = from;
         let widgetTo = to;
-        if (config.timeRange && config.timeRange !== timeRange) {
+        if (!timeRange && config.timeRange) {
           const resolved = this.resolveTimeWindow(config.timeRange);
           widgetFrom = resolved.from;
           widgetTo = resolved.to;
