@@ -45,20 +45,26 @@ import {
           }
         }
 
+        const commonOptions = {
+          maxRetriesPerRequest: null, // Required by BullMQ
+          enableReadyCheck: false,
+          keepAlive: 10000,
+          connectTimeout: 10000,
+          retryStrategy: (times: number) => Math.min(times * 100, 3000),
+        };
+
         if (redisUrl && (redisUrl.startsWith('redis://') || redisUrl.startsWith('rediss://'))) {
-          client = new Redis(redisUrl, {
-            maxRetriesPerRequest: null, // Required by BullMQ
-            enableReadyCheck: false,
-          });
+          client = new Redis(redisUrl, commonOptions);
         } else {
           const host = process.env.REDIS_HOST || 'localhost';
           const port = parseInt(process.env.REDIS_PORT || '6380', 10);
           client = new Redis({
             host,
             port,
-            maxRetriesPerRequest: null, // Required by BullMQ
+            ...commonOptions,
           });
         }
+
         client.on('error', (err) => {
           console.warn('[Redis] Connection event:', err.message);
         });
