@@ -202,9 +202,8 @@ export function normalizeMetricId(metricId: string): string {
     case 'availability':
     case 'uptime':
     case 'sla':
-    case 'reliability':
-    case 'reliability_score':
       return 'availability';
+
     case 'success_rate':
     case 'success':
       return 'success_rate';

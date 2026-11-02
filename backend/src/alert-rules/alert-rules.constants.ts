@@ -7,9 +7,9 @@ export const SUPPORTED_ALERT_CONDITIONS = [
   'availability',
   'consecutive failures',
   'API DOWN',
-  'reliability score',
   'schema change',
 ] as const;
+
 
 export type SupportedAlertMetric = (typeof SUPPORTED_ALERT_CONDITIONS)[number];
 

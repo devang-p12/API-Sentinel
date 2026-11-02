@@ -30,7 +30,8 @@ export class CreateAlertRuleDto {
 
   @IsString()
   @IsNotEmpty({ message: 'Metric is required' })
-  metric: string; // e.g. "error rate", "P95 latency", "availability", "consecutive failures", "API DOWN", "reliability score", "schema change"
+  metric: string; // e.g. "error rate", "P95 latency", "availability", "consecutive failures", "API DOWN", "schema change"
+
 
   @IsString()
   @IsOptional()
