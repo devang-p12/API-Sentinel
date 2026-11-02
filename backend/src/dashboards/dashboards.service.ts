@@ -278,17 +278,12 @@ export class DashboardsService {
         const config = (w.configuration as any) || {};
 
         // Global header filters govern the dashboard widgets universally
-        const effectiveApiId = globalApiId || config.apiId;
-        const effectiveEnvironmentId = globalEnvironmentId || config.environmentId;
-        const effectiveMonitorId = globalMonitorId || config.monitorId;
+        const effectiveApiId = globalApiId || undefined;
+        const effectiveEnvironmentId = globalEnvironmentId || undefined;
+        const effectiveMonitorId = globalMonitorId || undefined;
 
-        let widgetFrom = from;
-        let widgetTo = to;
-        if (!timeRange && config.timeRange) {
-          const resolved = this.resolveTimeWindow(config.timeRange);
-          widgetFrom = resolved.from;
-          widgetTo = resolved.to;
-        }
+        const widgetFrom = from;
+        const widgetTo = to;
 
         const queryFilters = {
           projectId: dashboard.projectId,
@@ -366,14 +361,23 @@ export class DashboardsService {
     let durationMs = 24 * 60 * 60 * 1000;
 
     switch (p) {
+      case '5m':
+        durationMs = 5 * 60 * 1000;
+        break;
       case '15m':
         durationMs = 15 * 60 * 1000;
+        break;
+      case '30m':
+        durationMs = 30 * 60 * 1000;
         break;
       case '1h':
         durationMs = 60 * 60 * 1000;
         break;
       case '6h':
         durationMs = 6 * 60 * 60 * 1000;
+        break;
+      case '12h':
+        durationMs = 12 * 60 * 60 * 1000;
         break;
       case '24h':
         durationMs = 24 * 60 * 60 * 1000;

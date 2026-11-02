@@ -32,11 +32,12 @@ export class PostgresMetricDataSource implements MetricDataSource {
         responseSize: true,
         executedAt: true,
       },
-      orderBy: { executedAt: 'asc' },
+      orderBy: { executedAt: 'desc' },
+      take: 20000,
     });
 
     if (execs.length > 0) {
-      return execs;
+      return execs.reverse();
     }
 
     // Fallback: Check MonitorResult if executions were logged in monitor_results
