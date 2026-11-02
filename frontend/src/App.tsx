@@ -25,7 +25,6 @@ import { NotificationPoliciesPage } from "@/pages/NotificationPoliciesPage"
 import { NotificationHistoryPage } from "@/pages/NotificationHistoryPage"
 import { DashboardsPage } from "@/pages/DashboardsPage"
 import { DashboardViewPage } from "@/pages/DashboardViewPage"
-import { AnalyticsPage } from "@/pages/AnalyticsPage"
 import { SettingsPage } from "@/pages/SettingsPage"
 import { NotFoundPage } from "@/pages/NotFoundPage"
 
@@ -49,7 +48,7 @@ export function App() {
               <Route path="monitors" element={<MonitorsPage />} />
               <Route path="monitors/:id" element={<MonitorDetailPage />} />
               <Route path="contracts" element={<ContractsPage />} />
-              <Route path="analytics" element={<AnalyticsPage />} />
+              <Route path="analytics" element={<Navigate to="/dashboard" replace />} />
               <Route path="load-tests" element={<LoadTestsListPage />} />
               <Route path="load-tests/new" element={<CreateLoadTestPage />} />
               <Route path="load-tests/:id" element={<LoadTestDetailPage />} />
