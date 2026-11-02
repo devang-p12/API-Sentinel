@@ -47,6 +47,7 @@ ENV K6_BIN_PATH=/usr/local/bin/k6
 
 COPY package*.json ./
 COPY prisma ./prisma/
+COPY scripts ./scripts/
 
 # Install only production dependencies and prisma CLI for database migration/push
 RUN npm ci --omit=dev && npm install prisma@^5.14.0 && npx prisma generate
@@ -56,6 +57,7 @@ COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 
-# Start NestJS with schema auto-push to ensure all SaaS tables exist in remote PostgreSQL
-CMD ["sh", "-c", "npx prisma db push --skip-generate --accept-data-loss && node dist/main"]
+# Pre-backfill missing multi-tenant columns, push schema, and start NestJS
+CMD ["sh", "-c", "node scripts/db-prep.js && npx prisma db push --skip-generate --accept-data-loss && node dist/main"]
+
 
