@@ -476,8 +476,18 @@ export class AlertRulesService {
    * Evaluates an alert rule against an observed metric value,
    * enforcing condition evaluation and deduplication / cooldown suppression.
    */
-  async evaluateRule(ruleId: string, metricValue: number, organizationId?: string) {
+  async evaluateRule(ruleId: string, metricValue?: number, organizationId?: string) {
+    if (metricValue === undefined || metricValue === null || isNaN(metricValue)) {
+      await this.findOne(ruleId, organizationId);
+      const evalRes = await this.evaluationService.evaluateRule(ruleId);
+      return {
+        triggered: evalRes?.conditionMet ?? false,
+        evaluation: evalRes,
+      };
+    }
+
     const rule = await this.findOne(ruleId, organizationId);
+
 
     if (!rule.enabled) {
       return {

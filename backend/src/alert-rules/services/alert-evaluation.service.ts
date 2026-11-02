@@ -174,6 +174,38 @@ export class AlertEvaluationService {
           },
         });
         savedInstanceId = updated.id;
+      } else {
+        // State is NORMAL and no active instance was open.
+        // Update any existing instance for this rule to NORMAL or create a baseline instance
+        // so that rule.instances[0] properly reflects status and lastEvaluatedAt.
+        const existing = await tx.alertInstance.findFirst({
+          where: { fingerprint },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (existing) {
+          const updated = await tx.alertInstance.update({
+            where: { id: existing.id },
+            data: {
+              status: AlertState.NORMAL,
+              currentValue: metricValue,
+              lastEvaluatedAt: now,
+            },
+          });
+          savedInstanceId = updated.id;
+        } else {
+          const created = await tx.alertInstance.create({
+            data: {
+              alertRuleId: rule.id,
+              fingerprint,
+              status: AlertState.NORMAL,
+              currentValue: metricValue,
+              threshold: rule.threshold,
+              lastEvaluatedAt: now,
+            },
+          });
+          savedInstanceId = created.id;
+        }
       }
 
       // Record evaluation history (Section 11)
@@ -198,6 +230,7 @@ export class AlertEvaluationService {
         newState: transition.newState,
       };
     });
+
 
     // 5. Structured observability log (Section 32)
     this.logger.log(
@@ -365,17 +398,29 @@ export class AlertEvaluationService {
       include: { environment: true },
     });
 
-    if (!monitor) return;
+    let envId = monitor?.environmentId;
+    let apiId = monitor?.environment?.apiId || monitor?.apiId;
+
+    if (!monitor) {
+      const config = await this.prisma.monitorConfig.findUnique({
+        where: { id: monitorId },
+        include: { environment: true },
+      });
+      if (config) {
+        envId = config.environmentId;
+        apiId = config.environment?.apiId || config.apiId;
+      }
+    }
+
+    const orConditions: any[] = [{ monitorId }];
+    if (envId) orConditions.push({ environmentId: envId });
+    if (apiId) orConditions.push({ apiId });
 
     // Find enabled rules targeting this monitor, environment, or API
     const rules = await this.prisma.alertRule.findMany({
       where: {
         enabled: true,
-        OR: [
-          { monitorId: monitor.id },
-          { environmentId: monitor.environmentId },
-          { apiId: monitor.environment.apiId },
-        ],
+        OR: orConditions,
       },
       select: { id: true },
     });
@@ -388,4 +433,5 @@ export class AlertEvaluationService {
       }
     }
   }
+
 }

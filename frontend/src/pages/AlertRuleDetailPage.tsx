@@ -147,9 +147,29 @@ export function AlertRuleDetailPage() {
   const activeInstance = rule?.instances?.[0];
   const currentState = useMemo(() => {
     if (!rule?.enabled) return 'DISABLED';
-    if (!activeInstance) return 'NORMAL';
-    return activeInstance.status;
-  }, [rule, activeInstance]);
+    if (activeInstance) return activeInstance.status;
+    if (evaluations?.[0]) return evaluations[0].stateAfter;
+    if (rule?.evaluations?.[0]) return rule.evaluations[0].stateAfter;
+    return 'NORMAL';
+  }, [rule, activeInstance, evaluations]);
+
+
+  const [isEvaluatingNow, setIsEvaluatingNow] = useState(false);
+
+  // Evaluate now handler
+  const handleEvaluateNow = async () => {
+    if (!rule) return;
+    setIsEvaluatingNow(true);
+    try {
+      await api.evaluateAlertRule(rule.id);
+      await loadRuleData(true);
+      await fetchChartData();
+    } catch (err: any) {
+      console.error('Failed to evaluate rule:', err);
+    } finally {
+      setIsEvaluatingNow(false);
+    }
+  };
 
   // Test rule handler
   const handleTestRule = async () => {
@@ -169,6 +189,7 @@ export function AlertRuleDetailPage() {
       setIsTesting(false);
     }
   };
+
 
   // Toggle rule enable/disable
   const handleToggleEnable = async () => {
@@ -375,6 +396,22 @@ export function AlertRuleDetailPage() {
             <span>Refresh</span>
           </Button>
 
+          {/* Evaluate now */}
+          <Button
+            variant="default"
+            size="sm"
+            onClick={handleEvaluateNow}
+            disabled={isEvaluatingNow}
+            className="text-xs font-mono gap-1.5"
+            title="Evaluate live metric telemetry and update state"
+          >
+            <HugeiconsIcon
+              icon={PlayIcon}
+              className={`size-3.5 ${isEvaluatingNow ? 'animate-spin' : ''}`}
+            />
+            <span>{isEvaluatingNow ? 'Evaluating...' : 'Evaluate now'}</span>
+          </Button>
+
           {/* Test rule */}
           <Button
             variant="outline"
@@ -390,6 +427,7 @@ export function AlertRuleDetailPage() {
             />
             <span>Test rule</span>
           </Button>
+
 
           {/* Edit rule */}
           <Button

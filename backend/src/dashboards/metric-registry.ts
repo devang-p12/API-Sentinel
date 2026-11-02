@@ -152,12 +152,106 @@ export const METRIC_REGISTRY: Record<string, MetricDefinition> = {
     supportedVisualizations: ['stat', 'gauge', 'time_series', 'table'],
     defaultVisualization: 'stat',
   },
+  schema_change: {
+    id: 'schema_change',
+    name: 'Schema Changes',
+    description: 'Number of unexpected or breaking schema alterations detected',
+    category: 'reliability',
+    unit: 'changes',
+    supportedVisualizations: ['stat', 'bar', 'time_series', 'table'],
+    defaultVisualization: 'stat',
+  },
 };
+
+export function normalizeMetricId(metricId: string): string {
+  if (!metricId) return '';
+  const clean = metricId.trim().toLowerCase().replace(/[\s-]+/g, '_');
+
+  switch (clean) {
+    case 'error_rate':
+    case 'errorrate':
+    case 'error':
+    case 'errors':
+      return 'error_rate';
+    case 'p95_latency':
+    case 'p95':
+    case 'p95latency':
+      return 'p95_latency';
+    case 'p50_latency':
+    case 'p50':
+    case 'median_latency':
+    case 'median':
+      return 'p50_latency';
+    case 'p90_latency':
+    case 'p90':
+      return 'p90_latency';
+    case 'p99_latency':
+    case 'p99':
+      return 'p99_latency';
+    case 'average_latency':
+    case 'avg_latency':
+    case 'avg':
+    case 'latency':
+      return 'average_latency';
+    case 'min_latency':
+    case 'minimum_latency':
+      return 'min_latency';
+    case 'max_latency':
+    case 'maximum_latency':
+      return 'max_latency';
+    case 'availability':
+    case 'uptime':
+    case 'sla':
+    case 'reliability':
+    case 'reliability_score':
+      return 'availability';
+    case 'success_rate':
+    case 'success':
+      return 'success_rate';
+    case 'consecutive_failures':
+    case 'consecutive_failure':
+    case 'failure_count':
+    case 'failures':
+    case 'failure':
+    case 'api_down':
+    case 'down':
+      return 'failure_count';
+    case 'timeout_count':
+    case 'timeouts':
+    case 'timeout':
+      return 'timeout_count';
+    case 'request_count':
+    case 'requests':
+    case 'checks':
+    case 'probes':
+      return 'request_count';
+    case 'response_size':
+    case 'size':
+    case 'payload_size':
+      return 'response_size';
+    case 'http_status_distribution':
+    case 'status_distribution':
+    case 'status_codes':
+      return 'http_status_distribution';
+    case 'schema_change':
+    case 'schema_changes':
+    case 'schemachange':
+      return 'schema_change';
+    default:
+      return clean;
+  }
+}
 
 export function getMetricCatalog(): MetricDefinition[] {
   return Object.values(METRIC_REGISTRY);
 }
 
 export function getMetricDefinition(metricId: string): MetricDefinition | undefined {
-  return METRIC_REGISTRY[metricId];
+  if (!metricId) return undefined;
+  if (METRIC_REGISTRY[metricId]) {
+    return METRIC_REGISTRY[metricId];
+  }
+  const normalized = normalizeMetricId(metricId);
+  return METRIC_REGISTRY[normalized];
 }
+

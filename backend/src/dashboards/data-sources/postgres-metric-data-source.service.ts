@@ -15,7 +15,7 @@ export class PostgresMetricDataSource implements MetricDataSource {
       return [];
     }
 
-    return this.prisma.monitorExecution.findMany({
+    const execs = await this.prisma.monitorExecution.findMany({
       where: {
         monitorId: { in: query.monitorIds },
         executedAt: {
@@ -34,5 +34,41 @@ export class PostgresMetricDataSource implements MetricDataSource {
       },
       orderBy: { executedAt: 'asc' },
     });
+
+    if (execs.length > 0) {
+      return execs;
+    }
+
+    // Fallback: Check MonitorResult if executions were logged in monitor_results
+    const results = await this.prisma.monitorResult.findMany({
+      where: {
+        monitorConfigId: { in: query.monitorIds },
+        timestamp: {
+          gte: query.from,
+          lte: query.to,
+        },
+      },
+      select: {
+        id: true,
+        monitorConfigId: true,
+        success: true,
+        statusCode: true,
+        latencyMs: true,
+        responseSize: true,
+        timestamp: true,
+      },
+      orderBy: { timestamp: 'asc' },
+    });
+
+    return results.map((r) => ({
+      id: r.id,
+      monitorId: r.monitorConfigId || '',
+      status: r.success ? ('SUCCESS' as any) : ('ERROR' as any),
+      statusCode: r.statusCode,
+      responseTimeMs: r.latencyMs,
+      responseSize: r.responseSize,
+      executedAt: r.timestamp,
+    }));
   }
+
 }

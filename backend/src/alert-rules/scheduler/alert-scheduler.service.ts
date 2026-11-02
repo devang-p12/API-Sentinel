@@ -1,20 +1,49 @@
-import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { Queue } from 'bullmq';
 import { ALERT_BULL_QUEUE } from '../alert-rules.constants';
+import { AlertEvaluationService } from '../services/alert-evaluation.service';
 
 @Injectable()
-export class AlertSchedulerService implements OnModuleInit {
+export class AlertSchedulerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AlertSchedulerService.name);
+  private sweepInterval: NodeJS.Timeout | null = null;
 
-  constructor(@Inject(ALERT_BULL_QUEUE) private readonly alertQueue: Queue) {}
+  constructor(
+    @Inject(ALERT_BULL_QUEUE) private readonly alertQueue: Queue,
+    @Optional() private readonly evaluationService?: AlertEvaluationService,
+  ) {}
 
   onModuleInit() {
-    // Register global recurring alert evaluation sweep asynchronously in background
-    // to prevent blocking HTTP server port binding
+    // 1. Register global recurring alert evaluation sweep with BullMQ
     this.registerGlobalSweep(30).catch((err) => {
       this.logger.warn(`Deferred global alert sweep registration: ${err.message}`);
     });
+
+    // 2. Fallback periodic background interval (every 30s) to guarantee rules are evaluated
+    // even if Redis/BullMQ repeat scheduler is delayed or experiencing network partitions
+    if (this.evaluationService) {
+      // Immediate kickstart after 3s
+      setTimeout(() => {
+        this.evaluationService?.evaluateAllDueRules().catch((e) => {
+          this.logger.debug(`Initial alert sweep: ${e.message}`);
+        });
+      }, 3000);
+
+      this.sweepInterval = setInterval(() => {
+        this.evaluationService?.evaluateAllDueRules().catch((e) => {
+          this.logger.debug(`Background alert sweep: ${e.message}`);
+        });
+      }, 30000);
+    }
   }
+
+  onModuleDestroy() {
+    if (this.sweepInterval) {
+      clearInterval(this.sweepInterval);
+      this.sweepInterval = null;
+    }
+  }
+
 
   /**
    * Registers a global periodic sweep that ensures all enabled rules are evaluated.

@@ -1172,6 +1172,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  evaluateAlertRule: (id: string, metricValue?: number) =>
+    fetchJson<{ triggered: boolean; evaluation?: any }>(`/alert-rules/${id}/evaluate`, {
+      method: 'POST',
+      body: JSON.stringify(metricValue !== undefined ? { metricValue } : {}),
+    }),
+
 
   // Alert Instances APIs (Section 20)
   getAlerts: (query?: {

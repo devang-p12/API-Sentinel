@@ -266,14 +266,16 @@ export function AlertRulesListPage() {
       };
     }
     const instance = rule.instances?.[0];
-    if (!instance) {
+    const status = instance?.status || rule.evaluations?.[0]?.stateAfter;
+
+    if (!status) {
       return {
         label: 'Evaluating',
         className: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
       };
     }
 
-    switch (instance.status) {
+    switch (status) {
       case 'FIRING':
         return {
           label: 'Firing',
@@ -327,13 +329,13 @@ export function AlertRulesListPage() {
 
   // Format last evaluation relative time
   const formatLastEvaluation = (rule: AlertRule) => {
-    const lastEval = rule.evaluations?.[0];
-    if (!lastEval) {
+    const lastDateStr = rule.evaluations?.[0]?.evaluatedAt || rule.instances?.[0]?.lastEvaluatedAt;
+    if (!lastDateStr) {
       return <span className="text-muted-foreground text-xs font-mono">Evaluating</span>;
     }
-    const evalDate = new Date(lastEval.evaluatedAt);
+    const evalDate = new Date(lastDateStr);
     const now = new Date();
-    const diffSecs = Math.floor((now.getTime() - evalDate.getTime()) / 1000);
+    const diffSecs = Math.max(0, Math.floor((now.getTime() - evalDate.getTime()) / 1000));
 
     if (diffSecs < 60) return <span className="text-xs font-mono text-foreground">{diffSecs}s ago</span>;
     const diffMins = Math.floor(diffSecs / 60);
@@ -341,6 +343,7 @@ export function AlertRulesListPage() {
     const diffHours = Math.floor(diffMins / 60);
     return <span className="text-xs font-mono text-muted-foreground">{diffHours}h ago</span>;
   };
+
 
   return (
     <PageContainer

@@ -441,13 +441,7 @@ export class MetricQueryService {
     const where: any = {};
 
     if (filters?.organizationId) {
-      where.environment = {
-        api: {
-          project: {
-            organizationId: filters.organizationId,
-          },
-        },
-      };
+      where.organizationId = filters.organizationId;
     }
 
     if (filters?.projectId) {
@@ -461,10 +455,10 @@ export class MetricQueryService {
     }
 
     if (filters?.apiId) {
-      where.environment = {
-        ...(where.environment || {}),
-        apiId: filters.apiId,
-      };
+      where.OR = [
+        { apiId: filters.apiId },
+        { environment: { apiId: filters.apiId } },
+      ];
     }
 
     if (filters?.environmentId) {
@@ -475,8 +469,30 @@ export class MetricQueryService {
       where.id = filters.monitorId;
     }
 
-    return this.prisma.monitor.findMany({ where });
+    const monitors = await this.prisma.monitor.findMany({ where });
+
+    // Also include monitorConfigs targeting the same scope
+    const configWhere: any = {};
+    if (filters?.organizationId) configWhere.organizationId = filters.organizationId;
+    if (filters?.apiId) configWhere.apiId = filters.apiId;
+    if (filters?.environmentId) configWhere.environmentId = filters.environmentId;
+    if (filters?.monitorId) configWhere.id = filters.monitorId;
+
+    const configs = await this.prisma.monitorConfig.findMany({ where: configWhere });
+
+    return [
+      ...monitors,
+      ...configs.map((c) => ({
+        id: c.id,
+        name: c.name,
+        url: c.url,
+        environmentId: c.environmentId,
+        apiId: c.apiId,
+        organizationId: c.organizationId,
+      })),
+    ];
   }
+
 
   /**
    * Intelligently derives time-bucket durations from the requested time window:

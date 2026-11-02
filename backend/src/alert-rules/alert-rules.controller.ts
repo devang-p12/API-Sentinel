@@ -142,7 +142,7 @@ export class AlertRulesController {
   evaluate(
     @CurrentUser() user: any,
     @Param('id') id: string,
-    @Body('metricValue') metricValue: number,
+    @Body('metricValue') metricValue?: number,
   ) {
     return this.alertRulesService.evaluateRule(
       id,
