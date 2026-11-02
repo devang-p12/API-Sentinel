@@ -10,6 +10,8 @@ import { CreateMonitorDto } from './dto/create-monitor.dto';
 import { UpdateMonitorDto } from './dto/update-monitor.dto';
 import { MonitorSchedulerService } from './scheduler/monitor-scheduler.service';
 import { MonitorExecutionService } from './services/monitor-execution.service';
+import { HealthEvaluationService } from '../health-evaluation/health-evaluation.service';
+import { HealthPolicyConfig } from '../health-evaluation/interfaces/health-evaluation.interface';
 import { HttpMethod } from '@prisma/client';
 
 @Injectable()
@@ -20,6 +22,7 @@ export class MonitorsService {
     private readonly prisma: PrismaService,
     private readonly schedulerService: MonitorSchedulerService,
     private readonly executionService: MonitorExecutionService,
+    private readonly healthEvaluationService: HealthEvaluationService,
   ) {}
 
   /**
@@ -37,6 +40,10 @@ export class MonitorsService {
     return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
   }
 
+  // ==========================================
+  // Monitor (Standard / Legacy compatible)
+  // ==========================================
+
   async create(dto: CreateMonitorDto, organizationId?: string) {
     if (!dto.name || !dto.name.trim()) {
       throw new BadRequestException('Monitor name is required');
@@ -47,8 +54,11 @@ export class MonitorsService {
     }
 
     // Verify Environment existence and resolve full ownership hierarchy
-    const environment = await this.prisma.environment.findUnique({
-      where: { id: dto.environmentId },
+    const environment = await this.prisma.environment.findFirst({
+      where: {
+        id: dto.environmentId,
+        ...(organizationId ? { organizationId } : {}),
+      },
       include: {
         api: {
           include: {
@@ -62,10 +72,8 @@ export class MonitorsService {
       throw new NotFoundException(`Environment with ID ${dto.environmentId} not found`);
     }
 
-    // Authorization: Verify organization boundary if tenant is scoped
-    if (organizationId && environment.api.project.organizationId !== organizationId) {
-      throw new ForbiddenException('Access denied: Environment belongs to another organization');
-    }
+    const resolvedOrgId = organizationId || environment.organizationId || environment.api.project?.organizationId;
+    const resolvedApiId = dto.apiId || environment.apiId;
 
     const endpointPath = this.normalizeEndpoint(dto.endpoint || dto.url);
     const intervalSeconds = dto.intervalSeconds ?? dto.interval ?? 60;
@@ -73,7 +81,7 @@ export class MonitorsService {
     // Timeout resolution (supports both timeout in seconds and timeoutMs in milliseconds)
     let timeoutMs = dto.timeoutMs;
     if (dto.timeout !== undefined) {
-      timeoutMs = dto.timeout * 1000;
+      timeoutMs = dto.timeout > 100 ? dto.timeout : dto.timeout * 1000;
     }
     if (timeoutMs === undefined) {
       timeoutMs = 10000;
@@ -91,7 +99,7 @@ export class MonitorsService {
 
     // Build assertions list with default statusCode assertion if none provided
     const assertions = dto.assertions || [];
-    if (!assertions.some((a) => a.type === 'statusCode')) {
+    if (!assertions.some((a: any) => a.type === 'statusCode')) {
       assertions.push({
         type: 'statusCode',
         expected: expectedStatus,
@@ -110,7 +118,9 @@ export class MonitorsService {
         timeoutMs,
         isActive,
         assertions,
+        apiId: resolvedApiId,
         environmentId: dto.environmentId,
+        organizationId: resolvedOrgId,
       },
       include: {
         environment: {
@@ -121,9 +131,42 @@ export class MonitorsService {
       },
     });
 
-    // Register background repeatable schedule if scheduler is active
+    // Also register MonitorConfig entry for unified configuration
     try {
-      await this.schedulerService.scheduleMonitor(monitor);
+      await this.prisma.monitorConfig.create({
+        data: {
+          id: monitor.id,
+          name: monitor.name,
+          description: monitor.description,
+          method: monitor.method,
+          url: monitor.url,
+          headers: monitor.headers ?? {},
+          body: monitor.body,
+          queryParams: dto.queryParams ?? {},
+          interval: intervalSeconds,
+          timeout: timeoutMs,
+          enabled: isActive,
+          expectedStatus,
+          expectedResponse: assertions,
+          apiId: resolvedApiId,
+          environmentId: dto.environmentId,
+          organizationId: resolvedOrgId,
+        },
+      });
+    } catch (err: any) {
+      this.logger.debug(`Unified MonitorConfig record created or already exists: ${err.message}`);
+    }
+
+    // Register background repeatable schedule in BullMQ (organization-aware)
+    try {
+      await this.schedulerService.scheduleMonitor({
+        id: monitor.id,
+        organizationId: resolvedOrgId,
+        apiId: resolvedApiId,
+        environmentId: monitor.environmentId,
+        intervalSeconds,
+        isActive,
+      });
     } catch (err: any) {
       this.logger.warn(`Could not register schedule in BullMQ queue: ${err.message}`);
     }
@@ -138,11 +181,9 @@ export class MonitorsService {
   }) {
     return this.prisma.monitor.findMany({
       where: {
+        ...(filter?.organizationId ? { organizationId: filter.organizationId } : {}),
         ...(filter?.environmentId ? { environmentId: filter.environmentId } : {}),
         ...(filter?.apiId ? { environment: { apiId: filter.apiId } } : {}),
-        ...(filter?.organizationId
-          ? { environment: { api: { project: { organizationId: filter.organizationId } } } }
-          : {}),
       },
       include: {
         environment: {
@@ -160,8 +201,11 @@ export class MonitorsService {
   }
 
   async findOne(id: string, organizationId?: string) {
-    const monitor = await this.prisma.monitor.findUnique({
-      where: { id },
+    const monitor = await this.prisma.monitor.findFirst({
+      where: {
+        id,
+        ...(organizationId ? { organizationId } : {}),
+      },
       include: {
         environment: {
           include: {
@@ -183,13 +227,6 @@ export class MonitorsService {
       throw new NotFoundException(`Monitor with ID ${id} not found`);
     }
 
-    if (
-      organizationId &&
-      monitor.environment.api.project.organizationId !== organizationId
-    ) {
-      throw new ForbiddenException('Access denied: Monitor belongs to another organization');
-    }
-
     return monitor;
   }
 
@@ -198,9 +235,14 @@ export class MonitorsService {
 
     // If changing environmentId, verify that the new environment exists and belongs to the same organization
     let targetEnvId = existing.environmentId;
+    let targetApiId = existing.apiId || existing.environment?.apiId;
+
     if (dto.environmentId && dto.environmentId !== existing.environmentId) {
-      const targetEnv = await this.prisma.environment.findUnique({
-        where: { id: dto.environmentId },
+      const targetEnv = await this.prisma.environment.findFirst({
+        where: {
+          id: dto.environmentId,
+          ...(organizationId ? { organizationId } : {}),
+        },
         include: {
           api: {
             include: {
@@ -214,14 +256,8 @@ export class MonitorsService {
         throw new NotFoundException(`Environment with ID ${dto.environmentId} not found`);
       }
 
-      if (
-        organizationId &&
-        targetEnv.api.project.organizationId !== organizationId
-      ) {
-        throw new ForbiddenException('Access denied: Target environment belongs to another organization');
-      }
-
       targetEnvId = dto.environmentId;
+      targetApiId = targetEnv.apiId;
     }
 
     const intervalSeconds = dto.intervalSeconds ?? dto.interval ?? existing.intervalSeconds;
@@ -230,7 +266,7 @@ export class MonitorsService {
     if (dto.timeoutMs !== undefined) {
       timeoutMs = dto.timeoutMs;
     } else if (dto.timeout !== undefined) {
-      timeoutMs = dto.timeout * 1000;
+      timeoutMs = dto.timeout > 100 ? dto.timeout : dto.timeout * 1000;
     }
 
     if (timeoutMs >= intervalSeconds * 1000) {
@@ -266,6 +302,7 @@ export class MonitorsService {
         headers: dto.headers ?? (existing.headers as any),
         body: dto.body !== undefined ? dto.body : existing.body,
         assertions,
+        apiId: targetApiId,
         environmentId: targetEnvId,
       },
       include: {
@@ -277,8 +314,56 @@ export class MonitorsService {
       },
     });
 
+    // Update corresponding MonitorConfig
     try {
-      await this.schedulerService.scheduleMonitor(updated);
+      await this.prisma.monitorConfig.upsert({
+        where: { id },
+        create: {
+          id: updated.id,
+          name: updated.name,
+          description: updated.description,
+          method: updated.method,
+          url: updated.url,
+          headers: updated.headers ?? {},
+          body: updated.body,
+          interval: intervalSeconds,
+          timeout: timeoutMs,
+          enabled: isActive,
+          expectedStatus: expectedStatus || 200,
+          expectedResponse: assertions,
+          apiId: targetApiId,
+          environmentId: targetEnvId,
+          organizationId: existing.organizationId,
+        },
+        update: {
+          name: updated.name,
+          description: updated.description,
+          method: updated.method,
+          url: updated.url,
+          headers: updated.headers ?? {},
+          body: updated.body,
+          interval: intervalSeconds,
+          timeout: timeoutMs,
+          enabled: isActive,
+          expectedStatus: expectedStatus || 200,
+          expectedResponse: assertions,
+          apiId: targetApiId,
+          environmentId: targetEnvId,
+        },
+      });
+    } catch (e: any) {
+      this.logger.debug(`MonitorConfig upsert handled: ${e.message}`);
+    }
+
+    try {
+      await this.schedulerService.scheduleMonitor({
+        id: updated.id,
+        organizationId: existing.organizationId,
+        apiId: targetApiId,
+        environmentId: targetEnvId,
+        intervalSeconds,
+        isActive,
+      });
     } catch (err: any) {
       this.logger.warn(`Could not update BullMQ schedule for monitor ${id}: ${err.message}`);
     }
@@ -294,6 +379,10 @@ export class MonitorsService {
     } catch (err: any) {
       this.logger.warn(`Could not unschedule monitor ${id}: ${err.message}`);
     }
+
+    try {
+      await this.prisma.monitorConfig.delete({ where: { id } }).catch(() => null);
+    } catch {}
 
     return this.prisma.monitor.delete({
       where: { id },
@@ -326,7 +415,21 @@ export class MonitorsService {
     });
 
     try {
-      await this.schedulerService.scheduleMonitor(updated);
+      await this.prisma.monitorConfig.update({
+        where: { id },
+        data: { enabled: newActiveState },
+      }).catch(() => null);
+    } catch {}
+
+    try {
+      await this.schedulerService.scheduleMonitor({
+        id: updated.id,
+        organizationId: existing.organizationId,
+        apiId: updated.apiId || updated.environment?.apiId,
+        environmentId: updated.environmentId,
+        intervalSeconds: updated.intervalSeconds,
+        isActive: newActiveState,
+      });
     } catch (err: any) {
       this.logger.warn(`Could not toggle schedule in BullMQ for monitor ${id}: ${err.message}`);
     }
@@ -350,13 +453,98 @@ export class MonitorsService {
   }
 
   async triggerManualRun(id: string, organizationId?: string) {
-    await this.findOne(id, organizationId);
-    await this.schedulerService.triggerImmediateRun(id);
+    const existing = await this.findOne(id, organizationId);
+    return this.schedulerService.triggerImmediateRun({
+      id,
+      organizationId: existing.organizationId,
+      apiId: existing.apiId || existing.environment?.apiId,
+      environmentId: existing.environmentId,
+    });
+  }
+
+  // ==========================================
+  // MonitorConfig Specific Operations
+  // ==========================================
+
+  async createConfig(dto: CreateMonitorDto, organizationId: string) {
+    const monitor = await this.create(dto, organizationId);
     return {
-      message: `Immediate check queued for monitor ${id}`,
-      monitorId: id,
-      queued: true,
-      timestamp: new Date().toISOString(),
+      ...monitor,
+      interval: monitor.intervalSeconds,
+      timeout: monitor.timeoutMs,
+      enabled: monitor.isActive,
+      expectedStatus: dto.expectedStatus ?? dto.expectedStatusCode ?? 200,
     };
+  }
+
+  async findAllConfigs(filter: {
+    organizationId: string;
+    apiId?: string;
+    environmentId?: string;
+  }) {
+    return this.prisma.monitorConfig.findMany({
+      where: {
+        organizationId: filter.organizationId,
+        ...(filter.apiId ? { apiId: filter.apiId } : {}),
+        ...(filter.environmentId ? { environmentId: filter.environmentId } : {}),
+      },
+      include: {
+        api: true,
+        environment: true,
+        results: {
+          take: 1,
+          orderBy: { timestamp: 'desc' },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async findOneConfig(id: string, organizationId: string) {
+    const config = await this.prisma.monitorConfig.findFirst({
+      where: {
+        id,
+        organizationId,
+      },
+      include: {
+        api: true,
+        environment: true,
+        results: {
+          take: 10,
+          orderBy: { timestamp: 'desc' },
+        },
+      },
+    });
+
+    if (!config) {
+      throw new NotFoundException(`MonitorConfig ${id} not found`);
+    }
+
+    return config;
+  }
+
+  async updateConfig(id: string, dto: UpdateMonitorDto, organizationId: string) {
+    return this.update(id, dto, organizationId);
+  }
+
+  async deleteConfig(id: string, organizationId: string) {
+    return this.delete(id, organizationId);
+  }
+
+  async getResults(filter: {
+    organizationId: string;
+    apiId?: string;
+    environmentId?: string;
+    monitorConfigId?: string;
+    limit?: number;
+    offset?: number;
+    from?: Date;
+    to?: Date;
+  }) {
+    return this.executionService.getMonitorResults(filter);
+  }
+
+  async getHealth(id: string, organizationId?: string, policy?: HealthPolicyConfig) {
+    return this.healthEvaluationService.evaluateMonitor(id, organizationId, policy);
   }
 }

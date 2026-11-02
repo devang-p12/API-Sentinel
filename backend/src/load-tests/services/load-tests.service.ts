@@ -32,7 +32,7 @@ export class LoadTestsService {
   /**
    * Initiates a new load test, applies safety limits, persists record, and queues BullMQ job.
    */
-  async create(dto: CreateLoadTestDto, userId?: string) {
+  async create(dto: CreateLoadTestDto, userId?: string, organizationId?: string) {
     const maxVus = parseInt(process.env.LOAD_TEST_MAX_VUS || '500', 10);
     const maxDuration = parseInt(process.env.LOAD_TEST_MAX_DURATION || '3600', 10);
     const maxRequests = parseInt(process.env.LOAD_TEST_MAX_REQUESTS || '1000000', 10);
@@ -69,8 +69,11 @@ export class LoadTestsService {
     }
 
     // Verify Project
-    const project = await this.prisma.project.findUnique({
-      where: { id: dto.projectId },
+    const project = await this.prisma.project.findFirst({
+      where: {
+        id: dto.projectId,
+        ...(organizationId ? { organizationId } : {}),
+      },
     });
     if (!project) {
       throw new NotFoundException(`Project with ID ${dto.projectId} not found`);
@@ -90,8 +93,11 @@ export class LoadTestsService {
 
     // Verify Environment if provided
     if (dto.environmentId) {
-      const env = await this.prisma.environment.findUnique({
-        where: { id: dto.environmentId },
+      const env = await this.prisma.environment.findFirst({
+        where: {
+          id: dto.environmentId,
+          ...(organizationId ? { organizationId } : {}),
+        },
       });
       if (!env) {
         throw new NotFoundException(
@@ -106,6 +112,7 @@ export class LoadTestsService {
         name: dto.name.trim(),
         description: dto.description?.trim() || null,
         projectId: dto.projectId,
+        organizationId: project.organizationId,
         apiId: dto.apiId || null,
         environmentId: dto.environmentId || null,
         createdBy: userId || null,
@@ -158,9 +165,12 @@ export class LoadTestsService {
   /**
    * Retrieves list of historical load tests with filtering and pagination.
    */
-  async findAll(query: QueryLoadTestsDto) {
+  async findAll(query: QueryLoadTestsDto, organizationId?: string) {
     const where: Prisma.LoadTestWhereInput = {};
 
+    if (organizationId) {
+      where.organizationId = organizationId;
+    }
     if (query.projectId) {
       where.projectId = query.projectId;
     }
@@ -208,9 +218,12 @@ export class LoadTestsService {
   /**
    * Retrieves a single load test with full result, samples, and live progress if RUNNING.
    */
-  async findOne(id: string) {
-    const loadTest = await this.prisma.loadTest.findUnique({
-      where: { id },
+  async findOne(id: string, organizationId?: string) {
+    const loadTest = await this.prisma.loadTest.findFirst({
+      where: {
+        id,
+        ...(organizationId ? { organizationId } : {}),
+      },
       include: {
         api: true,
         environment: true,
@@ -240,14 +253,8 @@ export class LoadTestsService {
   /**
    * Cancels a queued or running load test safely.
    */
-  async cancel(id: string) {
-    const loadTest = await this.prisma.loadTest.findUnique({
-      where: { id },
-    });
-
-    if (!loadTest) {
-      throw new NotFoundException(`Load test with ID ${id} not found`);
-    }
+  async cancel(id: string, organizationId?: string) {
+    const loadTest = await this.findOne(id, organizationId);
 
     if (
       loadTest.status === LoadTestStatus.COMPLETED ||
@@ -289,14 +296,8 @@ export class LoadTestsService {
   /**
    * Deletes a load test. Cancels if currently running.
    */
-  async delete(id: string) {
-    const loadTest = await this.prisma.loadTest.findUnique({
-      where: { id },
-    });
-
-    if (!loadTest) {
-      throw new NotFoundException(`Load test with ID ${id} not found`);
-    }
+  async delete(id: string, organizationId?: string) {
+    const loadTest = await this.findOne(id, organizationId);
 
     if (loadTest.status === LoadTestStatus.RUNNING) {
       await this.k6ExecutionService.cancel(id);

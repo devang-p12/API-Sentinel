@@ -6,6 +6,10 @@ import { MonitorExecutionService } from '../services/monitor-execution.service';
 
 export interface MonitorJobData {
   monitorId: string;
+  monitorConfigId?: string;
+  organizationId?: string;
+  apiId?: string;
+  environmentId?: string;
 }
 
 @Injectable()
@@ -46,34 +50,37 @@ export class MonitorWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   async process(job: Job<MonitorJobData>) {
-    const { monitorId } = job.data;
-    this.logger.log(`[MonitoringWorker] Starting monitor=${monitorId}`);
+    const { monitorId, organizationId } = job.data;
+    this.logger.log(`[MonitoringWorker] Starting monitor=${monitorId} org=${organizationId || 'unspecified'}`);
 
     try {
-      const execution = await this.executionService.executeMonitor(monitorId);
+      const execution = await this.executionService.executeMonitor(job.data);
 
       if (!execution) {
-        this.logger.log(`[MonitoringWorker] Monitor ${monitorId} was inactive or skipped.`);
+        this.logger.log(`[MonitoringWorker] Monitor ${monitorId} was inactive, unauthorized, or skipped.`);
         return null;
       }
 
       this.logger.log(
-        `[MonitoringWorker] Completed: monitor=${monitorId} status=${execution.statusCode ?? execution.status} duration=${execution.durationMs}ms`,
+        `[MonitoringWorker] Completed: monitor=${monitorId} status=${execution.statusCode ?? execution.status} duration=${execution.latencyMs ?? execution.durationMs}ms`,
       );
 
       return {
         monitorId,
+        organizationId: execution.organizationId,
         status: execution.status,
         statusCode: execution.statusCode,
-        responseTimeMs: execution.durationMs,
-        executionId: execution.id,
+        latencyMs: execution.latencyMs ?? execution.durationMs,
+        success: execution.success,
+        timeout: execution.timeout,
+        errorType: execution.errorType,
+        resultId: execution.id,
       };
     } catch (err: any) {
       this.logger.error(
         `[MonitoringWorker] Unexpected worker exception for monitor ${monitorId}: ${err.message}`,
         err.stack,
       );
-      // Even on unexpected exceptions, ensure worker stays alive
     }
   }
 

@@ -1,5 +1,6 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @Controller()
 export class AnalyticsController {
@@ -7,6 +8,7 @@ export class AnalyticsController {
 
   @Get('monitors/:id/analytics')
   getMonitorAnalytics(
+    @CurrentUser() user: any,
     @Param('id') id: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
@@ -16,11 +18,17 @@ export class AnalyticsController {
     const toDate = to ? new Date(to) : undefined;
     const bucketMinutes = bucket ? parseInt(bucket, 10) : 60;
 
-    return this.analyticsService.getMonitorAnalytics(id, fromDate, toDate, bucketMinutes);
+    return this.analyticsService.getMonitorAnalytics(
+      id,
+      fromDate,
+      toDate,
+      bucketMinutes,
+      user.organizationId,
+    );
   }
 
   @Get('apis/:id/analytics')
-  getApiAnalytics(@Param('id') id: string) {
-    return this.analyticsService.getApiAnalytics(id);
+  getApiAnalytics(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.analyticsService.getApiAnalytics(id, user.organizationId);
   }
 }

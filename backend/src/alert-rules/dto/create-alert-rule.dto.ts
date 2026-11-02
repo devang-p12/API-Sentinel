@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsEnum,
   IsNotEmpty,
@@ -20,12 +21,20 @@ export class CreateAlertRuleDto {
   description?: string;
 
   @IsString()
-  @IsNotEmpty({ message: 'Project ID is required' })
-  projectId: string;
+  @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  organizationId?: string;
 
   @IsString()
   @IsNotEmpty({ message: 'Metric is required' })
-  metric: string; // e.g. "p95_latency", "error_rate", "availability"
+  metric: string; // e.g. "error rate", "P95 latency", "availability", "consecutive failures", "API DOWN", "reliability score", "schema change"
+
+  @IsString()
+  @IsOptional()
+  operator?: string; // e.g. ">", ">=", "<", "<=", "==", "!="
 
   @IsString()
   @IsOptional()
@@ -42,7 +51,8 @@ export class CreateAlertRuleDto {
   @IsEnum(AlertCondition, {
     message: 'Condition must be GREATER_THAN, GREATER_THAN_OR_EQUAL, LESS_THAN, LESS_THAN_OR_EQUAL, EQUAL, or NOT_EQUAL',
   })
-  condition: AlertCondition;
+  @IsOptional()
+  condition?: AlertCondition;
 
   @IsNumber({}, { message: 'Threshold must be a valid number' })
   threshold: number;
@@ -60,6 +70,15 @@ export class CreateAlertRuleDto {
   @IsEnum(AlertSeverity)
   @IsOptional()
   severity?: AlertSeverity;
+
+  @IsArray()
+  @IsOptional()
+  notificationChannels?: any[]; // e.g. ["EMAIL", "SLACK", "WEBHOOK"]
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  cooldownSeconds?: number;
 
   @IsObject()
   @IsOptional()

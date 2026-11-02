@@ -13,6 +13,7 @@ import {
   SidebarRight01Icon,
   FlashIcon,
   PlayIcon,
+  FileCodeIcon,
 } from "@hugeicons/core-free-icons"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -36,10 +37,12 @@ const NAV_ITEMS: NavItem[] = [
   { name: "APIs", to: "/apis", icon: ApiIcon },
   { name: "API Tester", to: "/api-tester", icon: PlayIcon },
   { name: "Monitors", to: "/monitors", icon: Activity01Icon },
+  { name: "Contracts & Schema", to: "/contracts", icon: FileCodeIcon },
+  { name: "Analytics", to: "/analytics", icon: ChartLineData01Icon, badge: "Live" },
   { name: "Load Tests", to: "/load-tests", icon: FlashIcon },
   { name: "Incidents", to: "/incidents", icon: AlertCircleIcon },
   { name: "Alert Rules", to: "/alert-rules", icon: Notification01Icon },
-  { name: "Dashboards", to: "/dashboards", icon: ChartLineData01Icon },
+  { name: "Dashboards", to: "/dashboards", icon: DashboardSquare01Icon },
   { name: "Settings", to: "/settings", icon: Settings01Icon },
 ]
 

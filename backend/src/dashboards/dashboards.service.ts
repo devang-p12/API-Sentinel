@@ -31,23 +31,24 @@ export class DashboardsService {
     }
 
     let projectId = dto.projectId;
+    let project: any;
     if (!projectId) {
-      const defaultProject = await this.prisma.project.findFirst({
+      project = await this.prisma.project.findFirst({
         where: organizationId ? { organizationId } : undefined,
       });
-      if (!defaultProject) {
+      if (!project) {
         throw new NotFoundException('No active project found to associate with the dashboard');
       }
-      projectId = defaultProject.id;
+      projectId = project.id;
     } else {
-      const project = await this.prisma.project.findUnique({
-        where: { id: projectId },
+      project = await this.prisma.project.findFirst({
+        where: {
+          id: projectId,
+          ...(organizationId ? { organizationId } : {}),
+        },
       });
       if (!project) {
         throw new NotFoundException(`Project with ID ${projectId} not found`);
-      }
-      if (organizationId && project.organizationId !== organizationId) {
-        throw new ForbiddenException('You do not have access to this project');
       }
     }
 
@@ -56,6 +57,7 @@ export class DashboardsService {
         name: dto.name.trim(),
         description: dto.description?.trim(),
         projectId,
+        organizationId: project.organizationId,
         layout: [],
       },
       include: {
@@ -69,7 +71,7 @@ export class DashboardsService {
     return this.prisma.dashboard.findMany({
       where: {
         ...(projectId ? { projectId } : {}),
-        ...(organizationId ? { project: { organizationId } } : {}),
+        ...(organizationId ? { organizationId } : {}),
       },
       include: {
         project: {
@@ -84,8 +86,11 @@ export class DashboardsService {
   }
 
   async findOne(id: string, organizationId?: string) {
-    const dashboard = await this.prisma.dashboard.findUnique({
-      where: { id },
+    const dashboard = await this.prisma.dashboard.findFirst({
+      where: {
+        id,
+        ...(organizationId ? { organizationId } : {}),
+      },
       include: {
         project: true,
         widgets: {
@@ -96,10 +101,6 @@ export class DashboardsService {
 
     if (!dashboard) {
       throw new NotFoundException(`Dashboard with ID ${id} not found`);
-    }
-
-    if (organizationId && dashboard.project.organizationId !== organizationId) {
-      throw new ForbiddenException('You do not have access to this dashboard');
     }
 
     return dashboard;
@@ -264,12 +265,10 @@ export class DashboardsService {
       dashboard.widgets.map(async (w) => {
         const config = (w.configuration as any) || {};
 
-        // Section 44 & 45: Filter Precedence (Widget-specific > Dashboard global > Default)
         const effectiveApiId = config.apiId || globalApiId;
         const effectiveEnvironmentId = config.environmentId || globalEnvironmentId;
         const effectiveMonitorId = config.monitorId || globalMonitorId;
 
-        // Widget-specific time range override
         let widgetFrom = from;
         let widgetTo = to;
         if (config.timeRange && config.timeRange !== timeRange) {

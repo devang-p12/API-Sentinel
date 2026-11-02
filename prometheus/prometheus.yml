@@ -1,0 +1,25 @@
+# =============================================================================
+# API Sentinel - Internal Prometheus Infrastructure Configuration
+# =============================================================================
+# NOTICE: Prometheus is internal infrastructure for metric collection and
+# TSDB storage. It is NEVER exposed directly to customers.
+# Customers interact exclusively with the API Sentinel web application.
+# =============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: 'api-sentinel-backend'
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    static_configs:
+      - targets:
+          - 'backend:3000'
+          - 'host.docker.internal:3001'
+        labels:
+          component: 'sentinel-monitoring-engine'
+          source: 'synthetic-probes'

@@ -79,10 +79,51 @@ services:
     networks:
       - sentinel-net
 
+  # Internal Observability Infrastructure (Private Network Only - No Public Ports)
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: sentinel-grafana-prod
+    restart: always
+    environment:
+      - GF_SECURITY_ALLOW_EMBEDDING=false
+      - GF_SECURITY_COOKIE_SECURE=true
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-sentinel_internal_secret}
+    expose:
+      - "3000"
+    volumes:
+      - grafana_prod_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sentinel-net
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: sentinel-prometheus-prod
+    restart: always
+    expose:
+      - "9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_prod_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    networks:
+      - sentinel-net
+
 volumes:
   postgres_prod_data:
   redis_prod_data:
+  grafana_prod_data:
+  prometheus_prod_data:
 
 networks:
   sentinel-net:
     driver: bridge
+

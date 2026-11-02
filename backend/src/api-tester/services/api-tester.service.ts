@@ -18,14 +18,17 @@ export class ApiTesterService {
   /**
    * Execute a request, optionally pulling environment configuration and recording history.
    */
-  async executeRequest(dto: ExecuteRequestDto): Promise<ApiExecutionResult> {
+  async executeRequest(dto: ExecuteRequestDto, organizationId?: string): Promise<ApiExecutionResult> {
     const mergedVariables: Record<string, string> = { ...(dto.variables || {}) };
     let targetUrl = dto.url;
 
     // If an environment is specified, load its baseUrl and configured variables
     if (dto.environmentId) {
-      const env = await this.prisma.environment.findUnique({
-        where: { id: dto.environmentId },
+      const env = await this.prisma.environment.findFirst({
+        where: {
+          id: dto.environmentId,
+          ...(organizationId ? { organizationId } : {}),
+        },
       });
 
       if (env) {
@@ -76,6 +79,7 @@ export class ApiTesterService {
             projectId: dto.projectId || null,
             apiId: dto.apiId || null,
             environmentId: dto.environmentId || null,
+            organizationId: organizationId || null,
             method: dto.method,
             url: dto.url,
             status: result.status,
@@ -105,9 +109,12 @@ export class ApiTesterService {
   /**
    * Request History Operations
    */
-  async getHistory(projectId?: string, limit = 50) {
+  async getHistory(organizationId?: string, projectId?: string, limit = 50) {
     return this.prisma.apiRequestHistory.findMany({
-      where: projectId ? { projectId } : undefined,
+      where: {
+        ...(organizationId ? { organizationId } : {}),
+        ...(projectId ? { projectId } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       take: Math.min(limit, 100),
       include: {
@@ -118,9 +125,12 @@ export class ApiTesterService {
     });
   }
 
-  async clearHistory(projectId?: string) {
+  async clearHistory(organizationId?: string, projectId?: string) {
     const result = await this.prisma.apiRequestHistory.deleteMany({
-      where: projectId ? { projectId } : undefined,
+      where: {
+        ...(organizationId ? { organizationId } : {}),
+        ...(projectId ? { projectId } : {}),
+      },
     });
     return { count: result.count, message: 'History cleared successfully' };
   }
@@ -128,9 +138,12 @@ export class ApiTesterService {
   /**
    * Collections Operations
    */
-  async getCollections(projectId: string) {
+  async getCollections(organizationId?: string, projectId?: string) {
     return this.prisma.apiCollection.findMany({
-      where: { projectId },
+      where: {
+        ...(organizationId ? { organizationId } : {}),
+        ...(projectId ? { projectId } : {}),
+      },
       include: {
         requests: {
           orderBy: { createdAt: 'asc' },
@@ -144,10 +157,22 @@ export class ApiTesterService {
     });
   }
 
-  async createCollection(dto: CreateCollectionDto) {
+  async createCollection(dto: CreateCollectionDto, organizationId?: string) {
+    const project = await this.prisma.project.findFirst({
+      where: {
+        id: dto.projectId,
+        ...(organizationId ? { organizationId } : {}),
+      },
+    });
+
+    if (!project) {
+      throw new NotFoundException(`Project with ID ${dto.projectId} not found`);
+    }
+
     return this.prisma.apiCollection.create({
       data: {
         projectId: dto.projectId,
+        organizationId: project.organizationId,
         name: dto.name,
         description: dto.description || null,
       },
@@ -157,8 +182,13 @@ export class ApiTesterService {
     });
   }
 
-  async updateCollection(id: string, dto: UpdateCollectionDto) {
-    const exists = await this.prisma.apiCollection.findUnique({ where: { id } });
+  async updateCollection(id: string, dto: UpdateCollectionDto, organizationId?: string) {
+    const exists = await this.prisma.apiCollection.findFirst({
+      where: {
+        id,
+        ...(organizationId ? { organizationId } : {}),
+      },
+    });
     if (!exists) throw new NotFoundException(`Collection ${id} not found`);
 
     return this.prisma.apiCollection.update({
@@ -173,8 +203,13 @@ export class ApiTesterService {
     });
   }
 
-  async deleteCollection(id: string) {
-    const exists = await this.prisma.apiCollection.findUnique({ where: { id } });
+  async deleteCollection(id: string, organizationId?: string) {
+    const exists = await this.prisma.apiCollection.findFirst({
+      where: {
+        id,
+        ...(organizationId ? { organizationId } : {}),
+      },
+    });
     if (!exists) throw new NotFoundException(`Collection ${id} not found`);
 
     await this.prisma.apiCollection.delete({ where: { id } });
@@ -184,10 +219,22 @@ export class ApiTesterService {
   /**
    * Saved Requests Operations
    */
-  async saveRequest(dto: SaveRequestDto) {
+  async saveRequest(dto: SaveRequestDto, organizationId?: string) {
+    const project = await this.prisma.project.findFirst({
+      where: {
+        id: dto.projectId,
+        ...(organizationId ? { organizationId } : {}),
+      },
+    });
+
+    if (!project) {
+      throw new NotFoundException(`Project with ID ${dto.projectId} not found`);
+    }
+
     return this.prisma.savedApiRequest.create({
       data: {
         projectId: dto.projectId,
+        organizationId: project.organizationId,
         collectionId: dto.collectionId || null,
         apiId: dto.apiId || null,
         environmentId: dto.environmentId || null,
@@ -211,9 +258,12 @@ export class ApiTesterService {
     });
   }
 
-  async getSavedRequest(id: string) {
-    const req = await this.prisma.savedApiRequest.findUnique({
-      where: { id },
+  async getSavedRequest(id: string, organizationId?: string) {
+    const req = await this.prisma.savedApiRequest.findFirst({
+      where: {
+        id,
+        ...(organizationId ? { organizationId } : {}),
+      },
       include: {
         collection: true,
         api: true,
@@ -225,8 +275,13 @@ export class ApiTesterService {
     return req;
   }
 
-  async updateSavedRequest(id: string, dto: UpdateSavedRequestDto) {
-    const exists = await this.prisma.savedApiRequest.findUnique({ where: { id } });
+  async updateSavedRequest(id: string, dto: UpdateSavedRequestDto, organizationId?: string) {
+    const exists = await this.prisma.savedApiRequest.findFirst({
+      where: {
+        id,
+        ...(organizationId ? { organizationId } : {}),
+      },
+    });
     if (!exists) throw new NotFoundException(`Saved request ${id} not found`);
 
     return this.prisma.savedApiRequest.update({
@@ -255,8 +310,13 @@ export class ApiTesterService {
     });
   }
 
-  async deleteSavedRequest(id: string) {
-    const exists = await this.prisma.savedApiRequest.findUnique({ where: { id } });
+  async deleteSavedRequest(id: string, organizationId?: string) {
+    const exists = await this.prisma.savedApiRequest.findFirst({
+      where: {
+        id,
+        ...(organizationId ? { organizationId } : {}),
+      },
+    });
     if (!exists) throw new NotFoundException(`Saved request ${id} not found`);
 
     await this.prisma.savedApiRequest.delete({ where: { id } });

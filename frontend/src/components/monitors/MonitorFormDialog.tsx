@@ -11,6 +11,10 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { FileCodeIcon } from "@hugeicons/core-free-icons"
+import { CurlImportModal } from "@/components/common/CurlImportModal"
+import type { ParsedCurl } from "@/lib/curl-parser"
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const
 type HttpMethodType = (typeof HTTP_METHODS)[number]
@@ -31,6 +35,8 @@ interface MonitorFormDialogProps {
     timeout: number
     expectedStatus: number
     enabled: boolean
+    headers?: Record<string, string>
+    body?: string
   }) => Promise<void>
 }
 
@@ -60,8 +66,72 @@ export function MonitorFormDialog({
   const [expectedStatus, setExpectedStatus] = useState("200")
   const [enabled, setEnabled] = useState(true)
 
+  // Auth, Headers & Body states
+  const [authType, setAuthType] = useState<"none" | "bearer" | "apiKey" | "custom">("none")
+  const [bearerToken, setBearerToken] = useState("")
+  const [apiKeyName, setApiKeyName] = useState("X-API-Key")
+  const [apiKeyValue, setApiKeyValue] = useState("")
+  const [customHeaders, setCustomHeaders] = useState("")
+  const [requestBody, setRequestBody] = useState("")
+  const [showAdvanced, setShowAdvanced] = useState(false)
+
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isCurlModalOpen, setIsCurlModalOpen] = useState(false)
+
+  const handleImportCurl = (parsed: ParsedCurl) => {
+    // 1. Method
+    setMethod(parsed.method)
+
+    // 2. Endpoint
+    setEndpoint(parsed.endpoint || "/")
+
+    // 3. Name (auto-suggest if empty or default)
+    if (!name.trim()) {
+      setName(`${parsed.suggestedName} Monitor`)
+    }
+
+    // 4. Try to match an existing environment by baseUrl
+    if (parsed.baseUrl) {
+      const matchedEnv = environments.find(
+        (env) => env.baseUrl && env.baseUrl.replace(/\/+$/, "") === parsed.baseUrl.replace(/\/+$/, "")
+      )
+      if (matchedEnv) {
+        setSelectedEnvId(matchedEnv.id)
+      }
+    }
+
+    // 5. Auth & Headers
+    const nonAuthHeaders: Record<string, string> = {}
+    for (const [k, v] of Object.entries(parsed.headers)) {
+      const lower = k.toLowerCase()
+      if (lower === "authorization" || lower === "x-api-key" || lower === "api-key" || lower === "apikey") {
+        continue
+      }
+      nonAuthHeaders[k] = v
+    }
+
+    if (parsed.authType === "bearer" && parsed.bearerToken) {
+      setAuthType("bearer")
+      setBearerToken(parsed.bearerToken)
+      setShowAdvanced(true)
+    } else if (parsed.authType === "apiKey" && parsed.apiKeyName && parsed.apiKeyValue) {
+      setAuthType("apiKey")
+      setApiKeyName(parsed.apiKeyName)
+      setApiKeyValue(parsed.apiKeyValue)
+      setShowAdvanced(true)
+    } else if (Object.keys(nonAuthHeaders).length > 0) {
+      setAuthType("custom")
+      setCustomHeaders(JSON.stringify(nonAuthHeaders, null, 2))
+      setShowAdvanced(true)
+    }
+
+    // 6. Request Body
+    if (parsed.body) {
+      setRequestBody(parsed.body)
+      setShowAdvanced(true)
+    }
+  }
 
   // Fetch APIs and environments when dialog opens
   useEffect(() => {
@@ -142,6 +212,25 @@ export function MonitorFormDialog({
       setInterval(String(monitor.intervalSeconds || 60))
       setTimeout(String(Math.round((monitor.timeoutMs || 5000) / 1000)))
       setEnabled(monitor.isActive ?? true)
+      setRequestBody(monitor.body || "")
+
+      if (monitor.headers && Object.keys(monitor.headers).length > 0) {
+        const authHeader = monitor.headers["Authorization"] || monitor.headers["authorization"]
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+          setAuthType("bearer")
+          setBearerToken(authHeader.replace("Bearer ", ""))
+        } else if (monitor.headers["X-API-Key"] || monitor.headers["x-api-key"]) {
+          setAuthType("apiKey")
+          setApiKeyName("X-API-Key")
+          setApiKeyValue(monitor.headers["X-API-Key"] || monitor.headers["x-api-key"] || "")
+        } else {
+          setAuthType("custom")
+          setCustomHeaders(JSON.stringify(monitor.headers, null, 2))
+        }
+        setShowAdvanced(true)
+      } else if (monitor.body) {
+        setShowAdvanced(true)
+      }
 
       // Find status code assertion
       const statusAssertion = monitor.assertions?.find(
@@ -157,6 +246,13 @@ export function MonitorFormDialog({
       setTimeout("5")
       setExpectedStatus("200")
       setEnabled(true)
+      setAuthType("none")
+      setBearerToken("")
+      setApiKeyName("X-API-Key")
+      setApiKeyValue("")
+      setCustomHeaders("")
+      setRequestBody("")
+      setShowAdvanced(false)
     }
   }, [monitor, open])
 
@@ -214,6 +310,24 @@ export function MonitorFormDialog({
       return
     }
 
+    // Build headers & auth
+    const finalHeaders: Record<string, string> = {}
+    if (authType === "bearer" && bearerToken.trim()) {
+      finalHeaders["Authorization"] = `Bearer ${bearerToken.trim()}`
+    } else if (authType === "apiKey" && apiKeyName.trim() && apiKeyValue.trim()) {
+      finalHeaders[apiKeyName.trim()] = apiKeyValue.trim()
+    } else if (authType === "custom" && customHeaders.trim()) {
+      try {
+        const parsed = JSON.parse(customHeaders)
+        if (typeof parsed === "object" && parsed !== null) {
+          Object.assign(finalHeaders, parsed)
+        }
+      } catch {
+        setError("Custom Headers must be a valid JSON object (e.g. {\"X-Header\": \"value\"}).")
+        return
+      }
+    }
+
     setIsSubmitting(true)
     setError(null)
 
@@ -228,6 +342,8 @@ export function MonitorFormDialog({
         timeout: timeoutNum,
         expectedStatus: statusNum,
         enabled,
+        headers: Object.keys(finalHeaders).length > 0 ? finalHeaders : undefined,
+        body: ["POST", "PUT", "PATCH"].includes(method) && requestBody.trim() ? requestBody.trim() : undefined,
       })
       onOpenChange(false)
     } catch (err: any) {
@@ -241,13 +357,28 @@ export function MonitorFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <div className="flex items-center gap-2">
-            <DialogTitle className="text-base font-semibold">
-              {isEditing ? "Edit Monitor Configuration" : "Configure API Monitor"}
-            </DialogTitle>
-            <Badge variant="outline" className="text-[10px] font-mono">
-              {method}
-            </Badge>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <DialogTitle className="text-base font-semibold">
+                {isEditing ? "Edit Monitor Configuration" : "Configure API Monitor"}
+              </DialogTitle>
+              <Badge variant="outline" className="text-[10px] font-mono">
+                {method}
+              </Badge>
+            </div>
+            {!isEditing && (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={() => setIsCurlModalOpen(true)}
+                className="text-xs gap-1.5 font-mono shrink-0"
+                title="Populate monitor from cURL command"
+              >
+                <HugeiconsIcon icon={FileCodeIcon} size={13} />
+                Paste cURL
+              </Button>
+            )}
           </div>
           <DialogDescription className="text-xs">
             {isEditing
@@ -431,6 +562,133 @@ export function MonitorFormDialog({
             </div>
           </div>
 
+          {/* Advanced Request Options: Authentication, Headers & Request Body */}
+          <div className="border border-border bg-muted/10 p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                Authentication & Request Payload
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowAdvanced((prev) => !prev)}
+                className="text-[11px] text-primary hover:underline font-mono"
+              >
+                {showAdvanced ? "Hide Options ▲" : "Show Options ▼"}
+              </button>
+            </div>
+
+            {showAdvanced && (
+              <div className="space-y-3 pt-1 border-t border-border">
+                {/* Auth Mode */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-foreground block">
+                    Authentication Type
+                  </label>
+                  <select
+                    value={authType}
+                    onChange={(e) => setAuthType(e.target.value as any)}
+                    disabled={isSubmitting}
+                    className="w-full h-8 px-2.5 text-xs bg-background border border-input rounded-none focus:outline-none focus:border-ring font-mono"
+                  >
+                    <option value="none">No Auth (Public Endpoint)</option>
+                    <option value="bearer">Bearer Token (Authorization: Bearer ...)</option>
+                    <option value="apiKey">API Key (Custom Header)</option>
+                    <option value="custom">Custom Headers (Raw JSON)</option>
+                  </select>
+                </div>
+
+                {/* Bearer Token Input */}
+                {authType === "bearer" && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-foreground block">
+                      Bearer Token <span className="text-destructive">*</span>
+                    </label>
+                    <Input
+                      type="password"
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      value={bearerToken}
+                      onChange={(e) => setBearerToken(e.target.value)}
+                      disabled={isSubmitting}
+                      className="text-xs font-mono"
+                    />
+                    <span className="text-[10px] text-muted-foreground block">
+                      Automatically sent as `Authorization: Bearer &lt;token&gt;` with every probe.
+                    </span>
+                  </div>
+                )}
+
+                {/* API Key Inputs */}
+                {authType === "apiKey" && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-foreground block">Header Name</label>
+                      <Input
+                        placeholder="X-API-Key"
+                        value={apiKeyName}
+                        onChange={(e) => setApiKeyName(e.target.value)}
+                        disabled={isSubmitting}
+                        className="text-xs font-mono"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-foreground block">Header Value</label>
+                      <Input
+                        type="password"
+                        placeholder="api_key_secret_..."
+                        value={apiKeyValue}
+                        onChange={(e) => setApiKeyValue(e.target.value)}
+                        disabled={isSubmitting}
+                        className="text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Custom Headers JSON */}
+                {authType === "custom" && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-foreground block">
+                      Custom Headers (JSON)
+                    </label>
+                    <textarea
+                      rows={3}
+                      placeholder='{ "X-Tenant-ID": "tenant-123", "Accept": "application/json" }'
+                      value={customHeaders}
+                      onChange={(e) => setCustomHeaders(e.target.value)}
+                      disabled={isSubmitting}
+                      className="w-full p-2 text-xs font-mono bg-background border border-input rounded-none focus:outline-none focus:border-ring resize-y"
+                    />
+                  </div>
+                )}
+
+                {/* Request Body (for POST, PUT, PATCH, or custom) */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-foreground block">
+                      Request Body (Payload)
+                    </label>
+                    {["POST", "PUT", "PATCH"].includes(method) && (
+                      <span className="text-[10px] text-primary font-mono uppercase">
+                        Recommended for {method}
+                      </span>
+                    )}
+                  </div>
+                  <textarea
+                    rows={3}
+                    placeholder='{ "query": "{ health }", "action": "ping" }'
+                    value={requestBody}
+                    onChange={(e) => setRequestBody(e.target.value)}
+                    disabled={isSubmitting}
+                    className="w-full p-2 text-xs font-mono bg-background border border-input rounded-none focus:outline-none focus:border-ring resize-y"
+                  />
+                  <span className="text-[10px] text-muted-foreground block">
+                    Sent as raw payload for stateful or write API health checks.
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Enabled Switch */}
           <div className="flex items-center gap-2 p-2.5 bg-muted/20 border border-border">
             <input
@@ -468,6 +726,14 @@ export function MonitorFormDialog({
           </DialogFooter>
         </form>
       </DialogContent>
+
+      <CurlImportModal
+        open={isCurlModalOpen}
+        onOpenChange={setIsCurlModalOpen}
+        title="Configure Monitor from cURL"
+        description="Paste a cURL command. We'll automatically set the HTTP method, endpoint path, headers, auth token, and request body."
+        onImport={handleImportCurl}
+      />
     </Dialog>
   )
 }

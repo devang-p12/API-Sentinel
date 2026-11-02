@@ -7,20 +7,41 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateEnvironmentDto } from './dto/create-environment.dto';
 import { UpdateEnvironmentDto } from './dto/update-environment.dto';
+import {
+  validateAndNormalizeUrl,
+  sanitizeUrl,
+  maskUrl,
+  inferEnvironmentType,
+} from '../common/url-utils';
 
 @Injectable()
 export class EnvironmentsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(dto: CreateEnvironmentDto, apiIdOverride?: string) {
+  /**
+   * Helper to format environment for safe exposure (Requirement 3).
+   */
+  private formatEnvironment(env: any) {
+    return {
+      ...env,
+      baseUrl: sanitizeUrl(env.baseUrl),
+      maskedBaseUrl: maskUrl(env.baseUrl),
+    };
+  }
+
+  async create(
+    dto: CreateEnvironmentDto,
+    organizationId: string,
+    apiIdOverride?: string,
+  ) {
     const targetApiId = apiIdOverride || dto.apiId;
 
     if (!targetApiId) {
       throw new BadRequestException('apiId is required to register an environment');
     }
 
-    const api = await this.prisma.api.findUnique({
-      where: { id: targetApiId },
+    const api = await this.prisma.api.findFirst({
+      where: { id: targetApiId, organizationId },
     });
 
     if (!api) {
@@ -45,23 +66,30 @@ export class EnvironmentsService {
       );
     }
 
-    return this.prisma.environment.create({
+    const normalizedUrl = validateAndNormalizeUrl(dto.baseUrl);
+    const envType = dto.type || inferEnvironmentType(trimmedName);
+
+    const created = await this.prisma.environment.create({
       data: {
         name: trimmedName,
-        baseUrl: dto.baseUrl.trim(),
+        baseUrl: normalizedUrl,
+        type: envType,
         variables: dto.variables ?? {},
         apiId: targetApiId,
+        organizationId,
       },
       include: {
         monitors: true,
       },
     });
+
+    return this.formatEnvironment(created);
   }
 
-  async findAll(apiId?: string) {
+  async findAll(organizationId: string, apiId?: string) {
     if (apiId) {
-      const api = await this.prisma.api.findUnique({
-        where: { id: apiId },
+      const api = await this.prisma.api.findFirst({
+        where: { id: apiId, organizationId },
       });
 
       if (!api) {
@@ -69,18 +97,23 @@ export class EnvironmentsService {
       }
     }
 
-    return this.prisma.environment.findMany({
-      where: apiId ? { apiId } : undefined,
+    const environments = await this.prisma.environment.findMany({
+      where: {
+        organizationId,
+        ...(apiId ? { apiId } : {}),
+      },
       include: {
         monitors: true,
       },
       orderBy: { createdAt: 'asc' },
     });
+
+    return environments.map((env) => this.formatEnvironment(env));
   }
 
-  async findOne(id: string) {
-    const environment = await this.prisma.environment.findUnique({
-      where: { id },
+  async findOne(id: string, organizationId: string) {
+    const environment = await this.prisma.environment.findFirst({
+      where: { id, organizationId },
       include: {
         api: true,
         monitors: true,
@@ -91,17 +124,11 @@ export class EnvironmentsService {
       throw new NotFoundException(`Environment with ID ${id} not found`);
     }
 
-    return environment;
+    return this.formatEnvironment(environment);
   }
 
-  async update(id: string, dto: UpdateEnvironmentDto) {
-    const existing = await this.prisma.environment.findUnique({
-      where: { id },
-    });
-
-    if (!existing) {
-      throw new NotFoundException(`Environment with ID ${id} not found`);
-    }
+  async update(id: string, dto: UpdateEnvironmentDto, organizationId: string) {
+    const existing = await this.findOne(id, organizationId);
 
     const trimmedName = dto.name !== undefined ? dto.name.trim() : undefined;
 
@@ -122,30 +149,34 @@ export class EnvironmentsService {
       }
     }
 
-    return this.prisma.environment.update({
+    const normalizedUrl =
+      dto.baseUrl !== undefined ? validateAndNormalizeUrl(dto.baseUrl) : undefined;
+    const envType = dto.type !== undefined ? dto.type : undefined;
+
+    const updated = await this.prisma.environment.update({
       where: { id },
       data: {
-        name: trimmedName,
-        baseUrl: dto.baseUrl !== undefined ? dto.baseUrl.trim() : undefined,
-        variables: dto.variables,
+        ...(trimmedName !== undefined ? { name: trimmedName } : {}),
+        ...(normalizedUrl !== undefined ? { baseUrl: normalizedUrl } : {}),
+        ...(envType !== undefined ? { type: envType } : {}),
+        ...(dto.variables !== undefined ? { variables: dto.variables } : {}),
       },
       include: {
         monitors: true,
       },
     });
+
+    return this.formatEnvironment(updated);
   }
 
-  async delete(id: string) {
-    const existing = await this.prisma.environment.findUnique({
+  async delete(id: string, organizationId: string) {
+    await this.findOne(id, organizationId);
+
+    await this.prisma.environment.delete({
       where: { id },
     });
 
-    if (!existing) {
-      throw new NotFoundException(`Environment with ID ${id} not found`);
-    }
-
-    return this.prisma.environment.delete({
-      where: { id },
-    });
+    return { message: 'Environment deleted successfully', id };
   }
 }
+

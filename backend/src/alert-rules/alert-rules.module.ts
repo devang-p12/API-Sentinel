@@ -9,6 +9,7 @@ import { AlertInstancesService } from './services/alert-instances.service';
 import { AlertSchedulerService } from './scheduler/alert-scheduler.service';
 import { AlertEvaluationWorker } from './workers/alert-evaluation.worker';
 import { AlertRuleNotificationService } from './services/alert-rule-notification.service';
+import { GrafanaAlertsService } from './services/grafana-alerts.service';
 import { AlertRulesController } from './alert-rules.controller';
 
 @Module({
@@ -23,6 +24,7 @@ import { AlertRulesController } from './alert-rules.controller';
     AlertSchedulerService,
     AlertEvaluationWorker,
     AlertRuleNotificationService,
+    GrafanaAlertsService,
   ],
   exports: [
     AlertRulesService,
@@ -32,6 +34,7 @@ import { AlertRulesController } from './alert-rules.controller';
     AlertFingerprintService,
     AlertStateMachineService,
     AlertRuleNotificationService,
+    GrafanaAlertsService,
   ],
 })
 export class AlertRulesModule {}

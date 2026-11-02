@@ -17,6 +17,9 @@ import { CreateWidgetDto } from './dto/create-widget.dto';
 import { UpdateWidgetDto } from './dto/update-widget.dto';
 import { UpdateLayoutDto } from './dto/update-layout.dto';
 import { PreviewQueryDto } from './dto/preview-query.dto';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '@prisma/client';
 
 @Controller('dashboards')
 export class DashboardsController {
@@ -29,43 +32,54 @@ export class DashboardsController {
 
   @Post('preview')
   @HttpCode(HttpStatus.OK)
-  previewQuery(@Body() dto: PreviewQueryDto) {
+  previewQuery(@CurrentUser() user: any, @Body() dto: PreviewQueryDto) {
     return this.dashboardsService.previewQuery(dto);
   }
 
   @Post('metrics/query')
   @HttpCode(HttpStatus.OK)
-  queryMetric(@Body() dto: PreviewQueryDto) {
+  queryMetric(@CurrentUser() user: any, @Body() dto: PreviewQueryDto) {
     return this.dashboardsService.previewQuery(dto);
   }
 
   @Post()
-  create(@Body() dto: CreateDashboardDto) {
-    return this.dashboardsService.create(dto);
+  @Roles(UserRole.MEMBER)
+  create(@CurrentUser() user: any, @Body() dto: CreateDashboardDto) {
+    return this.dashboardsService.create(dto, user.organizationId);
   }
 
   @Get()
-  findAll(@Query('projectId') projectId?: string) {
-    return this.dashboardsService.findAll(projectId);
+  findAll(
+    @CurrentUser() user: any,
+    @Query('projectId') projectId?: string,
+  ) {
+    return this.dashboardsService.findAll(projectId, user.organizationId);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.dashboardsService.findOne(id);
+  findOne(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.dashboardsService.findOne(id, user.organizationId);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateDashboardDto) {
-    return this.dashboardsService.update(id, dto);
+  @Roles(UserRole.MEMBER)
+  update(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body() dto: UpdateDashboardDto,
+  ) {
+    return this.dashboardsService.update(id, dto, user.organizationId);
   }
 
   @Delete(':id')
-  delete(@Param('id') id: string) {
-    return this.dashboardsService.delete(id);
+  @Roles(UserRole.ADMIN, UserRole.OWNER)
+  delete(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.dashboardsService.delete(id, user.organizationId);
   }
 
   @Get(':id/data')
   getDashboardData(
+    @CurrentUser() user: any,
     @Param('id') id: string,
     @Query('timeRange') timeRange?: string,
     @Query('from') from?: string,
@@ -79,7 +93,7 @@ export class DashboardsController {
       timeRange,
       from,
       to,
-      undefined,
+      user.organizationId,
       apiId,
       environmentId,
       monitorId,
@@ -87,26 +101,43 @@ export class DashboardsController {
   }
 
   @Patch(':id/layout')
-  updateLayout(@Param('id') id: string, @Body() dto: UpdateLayoutDto) {
-    return this.dashboardsService.updateLayout(id, dto.layout);
+  @Roles(UserRole.MEMBER)
+  updateLayout(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body() dto: UpdateLayoutDto,
+  ) {
+    return this.dashboardsService.updateLayout(id, dto.layout, user.organizationId);
   }
 
   @Post(':id/widgets')
-  addWidget(@Param('id') id: string, @Body() dto: CreateWidgetDto) {
-    return this.dashboardsService.addWidget(id, dto);
+  @Roles(UserRole.MEMBER)
+  addWidget(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body() dto: CreateWidgetDto,
+  ) {
+    return this.dashboardsService.addWidget(id, dto, user.organizationId);
   }
 
   @Patch(':id/widgets/:widgetId')
+  @Roles(UserRole.MEMBER)
   updateWidget(
+    @CurrentUser() user: any,
     @Param('id') id: string,
     @Param('widgetId') widgetId: string,
     @Body() dto: UpdateWidgetDto,
   ) {
-    return this.dashboardsService.updateWidget(id, widgetId, dto);
+    return this.dashboardsService.updateWidget(id, widgetId, dto, user.organizationId);
   }
 
   @Delete(':id/widgets/:widgetId')
-  deleteWidget(@Param('id') id: string, @Param('widgetId') widgetId: string) {
-    return this.dashboardsService.deleteWidget(id, widgetId);
+  @Roles(UserRole.MEMBER)
+  deleteWidget(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Param('widgetId') widgetId: string,
+  ) {
+    return this.dashboardsService.deleteWidget(id, widgetId, user.organizationId);
   }
 }

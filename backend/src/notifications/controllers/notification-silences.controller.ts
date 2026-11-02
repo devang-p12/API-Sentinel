@@ -5,35 +5,39 @@ import {
   Delete,
   Body,
   Param,
-  Query,
 } from '@nestjs/common';
 import {
   NotificationSilencesService,
   CreateNotificationSilenceDto,
 } from '../services/notification-silences.service';
+import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { Roles } from '../../auth/decorators/roles.decorator';
+import { UserRole } from '@prisma/client';
 
 @Controller('notification-silences')
 export class NotificationSilencesController {
   constructor(private readonly silencesService: NotificationSilencesService) {}
 
   @Post()
+  @Roles(UserRole.MEMBER)
   create(
+    @CurrentUser() user: any,
     @Body() dto: CreateNotificationSilenceDto,
-    @Query('organizationId') organizationId?: string,
   ) {
-    return this.silencesService.create(dto, organizationId);
+    return this.silencesService.create(dto, user.organizationId);
   }
 
   @Get()
-  findAll(@Query('organizationId') organizationId?: string) {
-    return this.silencesService.findAll(organizationId);
+  findAll(@CurrentUser() user: any) {
+    return this.silencesService.findAll(user.organizationId);
   }
 
   @Delete(':id')
+  @Roles(UserRole.ADMIN, UserRole.OWNER)
   remove(
+    @CurrentUser() user: any,
     @Param('id') id: string,
-    @Query('organizationId') organizationId?: string,
   ) {
-    return this.silencesService.remove(id, organizationId);
+    return this.silencesService.remove(id, user.organizationId);
   }
 }

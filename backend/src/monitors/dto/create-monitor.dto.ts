@@ -35,9 +35,20 @@ export class CreateMonitorDto {
   @IsOptional()
   endpoint?: string;
 
+  @IsUUID('4', { message: 'apiId must be a valid UUID' })
+  @IsOptional()
+  apiId?: string;
+
   @IsUUID('4', { message: 'environmentId must be a valid UUID' })
   @IsNotEmpty({ message: 'environmentId is required' })
   environmentId: string;
+
+  @IsObject({ message: 'queryParams must be an object' })
+  @IsOptional()
+  queryParams?: Record<string, any>;
+
+  @IsOptional()
+  expectedResponse?: any;
 
   @IsInt({ message: 'Interval must be an integer' })
   @Min(5, { message: 'Interval must be at least 5 seconds' })
@@ -57,9 +68,9 @@ export class CreateMonitorDto {
   @IsOptional()
   timeoutMs?: number;
 
-  @IsInt({ message: 'Timeout must be an integer in seconds' })
-  @Min(1, { message: 'Timeout must be at least 1 second' })
-  @Max(60, { message: 'Timeout cannot exceed 60 seconds' })
+  @IsInt({ message: 'Timeout must be an integer' })
+  @Min(1, { message: 'Timeout must be at least 1' })
+  @Max(60000, { message: 'Timeout cannot exceed 60000ms' })
   @IsOptional()
   timeout?: number;
 

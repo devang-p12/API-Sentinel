@@ -103,6 +103,8 @@ export function MonitorsPage() {
       timeoutMs: data.timeout * 1000,
       expectedStatusCode: data.expectedStatus,
       isActive: data.enabled,
+      headers: data.headers,
+      body: data.body,
     })
     await fetchData()
   }
@@ -119,6 +121,8 @@ export function MonitorsPage() {
       timeoutMs: data.timeout * 1000,
       expectedStatusCode: data.expectedStatus,
       isActive: data.enabled,
+      headers: data.headers,
+      body: data.body,
     })
     setEditingMonitor(null)
     await fetchData()

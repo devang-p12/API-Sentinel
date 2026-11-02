@@ -1,5 +1,12 @@
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
 
+export type EnvironmentType =
+  | 'DEVELOPMENT'
+  | 'UAT'
+  | 'STAGING'
+  | 'PRODUCTION'
+  | 'CUSTOM';
+
 export interface Project {
   id: string;
   name: string;
@@ -10,19 +17,341 @@ export interface Project {
 export interface Api {
   id: string;
   name: string;
-  description?: string;
-  projectId: string;
-  project?: Project;
+  description?: string | null;
+  service?: string | null;
+  projectId?: string | null;
+  project?: Project | null;
+  organizationId?: string;
   environments?: Environment[];
+  createdAt?: string;
+  updatedAt?: string;
+  _count?: {
+    environments?: number;
+    monitors?: number;
+  };
 }
 
 export interface Environment {
   id: string;
   name: string;
   baseUrl?: string;
+  maskedBaseUrl?: string;
+  type?: EnvironmentType;
   variables?: Record<string, any>;
   apiId: string;
+  organizationId?: string;
+  api?: Api;
   monitors?: Monitor[];
+  createdAt?: string;
+  updatedAt?: string;
+  _count?: {
+    monitors?: number;
+  };
+}
+
+export interface ScoreDimension {
+  score: number;
+  weight: number;
+  contribution: number;
+  rawMetricValue: string;
+  description: string;
+}
+
+export interface ReliabilityScoreBreakdown {
+  overallScore: number;
+  grade: 'EXCELLENT' | 'GOOD' | 'FAIR' | 'POOR' | 'CRITICAL';
+  sampleCount: number;
+  periodStart: string | null;
+  periodEnd: string | null;
+  dimensions: {
+    availability: ScoreDimension;
+    latency: ScoreDimension;
+    errors: ScoreDimension;
+    latencyStability: ScoreDimension;
+    schema: ScoreDimension;
+  };
+  summary: string;
+  recordId?: string;
+}
+
+export interface ReliabilityScoreRecord {
+  id: string;
+  organizationId: string;
+  apiId: string;
+  environmentId?: string | null;
+  score: number;
+  availabilityScore: number;
+  latencyScore: number;
+  errorScore: number;
+  latencyStabilityScore: number;
+  schemaScore: number;
+  sampleCount: number;
+  periodStart: string | null;
+  periodEnd: string | null;
+  breakdown: ReliabilityScoreBreakdown;
+  calculatedAt: string;
+}
+
+export interface CustomerDashboardKpis {
+  totalApis: number;
+  healthy: number;
+  degraded: number;
+  down: number;
+  activeIncidents: number;
+  averageReliability: number;
+}
+
+export interface ApiHealthTableRow {
+  apiId: string;
+  apiName: string;
+  service?: string | null;
+  environmentId?: string | null;
+  environmentName?: string | null;
+  health: 'HEALTHY' | 'DEGRADED' | 'DOWN';
+  healthReason?: string;
+  reliability: number;
+  availability: number;
+  p95LatencyMs: number;
+  errorRate: number;
+  consecutiveFailures: number;
+  lastCheckedAt: string | null;
+}
+
+export interface ReliabilityTrendPoint {
+  timestamp: string;
+  score: number;
+}
+
+export interface LatencyTrendPoint {
+  timestamp: string;
+  p95Ms: number;
+  avgMs: number;
+}
+
+export interface ErrorRateTrendPoint {
+  timestamp: string;
+  errorRatePct: number;
+}
+
+export interface DashboardTrends {
+  reliabilityTrend: ReliabilityTrendPoint[];
+  latencyTrend: LatencyTrendPoint[];
+  errorRateTrend: ErrorRateTrendPoint[];
+}
+
+export interface RecentIncidentSummary {
+  id: string;
+  apiName?: string | null;
+  environmentName?: string | null;
+  severity: string;
+  status: string;
+  reason: string;
+  startedAt: string;
+  resolvedAt?: string | null;
+  durationSeconds?: number | null;
+}
+
+export interface RecentSchemaChangeSummary {
+  id: string;
+  apiName?: string | null;
+  endpoint?: string | null;
+  changeType: string;
+  severity: string;
+  fieldPath: string;
+  description: string;
+  detectedAt: string;
+}
+
+export interface ActiveAlertSummary {
+  id: string;
+  alertRuleId: string;
+  alertRuleName: string;
+  apiName?: string | null;
+  metric: string;
+  severity: string;
+  message: string;
+  metricValue?: number | null;
+  threshold?: number | null;
+  triggeredAt: string;
+}
+
+export interface CustomerDashboardSummary {
+  organizationId: string;
+  generatedAt: string;
+  kpis: CustomerDashboardKpis;
+  apiHealthTable: ApiHealthTableRow[];
+  trends: DashboardTrends;
+  recentIncidents: RecentIncidentSummary[];
+  recentSchemaChanges: RecentSchemaChangeSummary[];
+  activeAlerts: ActiveAlertSummary[];
+}
+
+export interface ApiOverviewMetrics {
+  health: 'HEALTHY' | 'DEGRADED' | 'DOWN';
+  healthReason: string;
+  reliabilityScore: number;
+  reliabilityGrade: string;
+  availabilityPct: number;
+  errorRatePct: number;
+  averageLatencyMs: number;
+  p95LatencyMs: number;
+  consecutiveFailures: number;
+  lastSuccessfulCheck: string | null;
+  lastFailedCheck: string | null;
+}
+
+export interface ApiPerformanceGraphs {
+  latencyGraph: Array<{
+    timestamp: string;
+    p95Ms: number;
+    avgMs: number;
+    maxMs: number;
+  }>;
+  errorGraph: Array<{
+    timestamp: string;
+    errorRatePct: number;
+    failureCount: number;
+    totalChecks: number;
+  }>;
+  availabilityGraph: Array<{
+    timestamp: string;
+    availabilityPct: number;
+  }>;
+}
+
+export interface ApiRecentCheckItem {
+  id: string;
+  timestamp: string;
+  statusCode: number | null;
+  latencyMs: number;
+  success: boolean;
+  timeout: boolean;
+  errorType: string | null;
+  errorMessage: string | null;
+  environmentId: string | null;
+  environmentName: string | null;
+}
+
+export interface ApiResponseTimeStats {
+  minMs: number;
+  maxMs: number;
+  avgMs: number;
+  p50Ms: number;
+  p90Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+}
+
+export interface ApiMonitoringSection {
+  recentChecks: ApiRecentCheckItem[];
+  failures: ApiRecentCheckItem[];
+  responseTimes: ApiResponseTimeStats;
+  totalChecksEvaluated: number;
+}
+
+export interface ApiContractSection {
+  schemas: Array<{
+    id: string;
+    endpoint: string;
+    method: string;
+    activeBaselineVersionId: string | null;
+    createdAt: string;
+    currentSchema: any | null;
+    versions: Array<{
+      id: string;
+      versionNumber: number;
+      isBaseline: boolean;
+      checksum: string | null;
+      createdAt: string;
+    }>;
+    changes: Array<{
+      id: string;
+      fieldPath: string;
+      changeType: string;
+      severity: string;
+      description: string;
+      isBreaking: boolean;
+      detectedAt: string;
+      isAcknowledged: boolean;
+    }>;
+  }>;
+  totalChanges: number;
+  breakingChangesCount: number;
+}
+
+export interface ApiIncidentsSection {
+  activeIncidents: Array<{
+    id: string;
+    title: string;
+    severity: string;
+    status: string;
+    reason: string | null;
+    startedAt: string;
+    environmentName: string | null;
+  }>;
+  historicalIncidents: Array<{
+    id: string;
+    title: string;
+    severity: string;
+    status: string;
+    reason: string | null;
+    startedAt: string;
+    resolvedAt: string | null;
+    durationSeconds: number | null;
+    environmentName: string | null;
+  }>;
+}
+
+export interface ApiAlertsSection {
+  configuredAlerts: Array<{
+    id: string;
+    name: string;
+    metric: string;
+    operator: string | null;
+    threshold: number;
+    duration: number;
+    severity: string;
+    enabled: boolean;
+    notificationChannels: any;
+    cooldownSeconds: number;
+    environmentName: string | null;
+  }>;
+}
+
+export interface ApiEnvironmentComparisonItem {
+  environmentId: string;
+  environmentName: string;
+  environmentType: string;
+  baseUrl: string | null;
+  maskedBaseUrl: string | null;
+  availability: number;
+  latency: number;
+  p95: number;
+  errors: number;
+  reliability: number;
+  health: 'HEALTHY' | 'DEGRADED' | 'DOWN';
+  consecutiveFailures: number;
+}
+
+export interface ApiDetailsResponse {
+  api: {
+    id: string;
+    name: string;
+    service: string | null;
+    description: string | null;
+    organizationId: string;
+    projectId: string | null;
+    projectName: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  overview: ApiOverviewMetrics;
+  performance: ApiPerformanceGraphs;
+  monitoring: ApiMonitoringSection;
+  contract: ApiContractSection;
+  incidents: ApiIncidentsSection;
+  alerts: ApiAlertsSection;
+  environments: ApiEnvironmentComparisonItem[];
 }
 
 export interface Monitor {
@@ -204,6 +533,15 @@ export interface AlertRule {
   _count?: { instances: number; evaluations: number; deliveries?: number };
 }
 
+export interface GrafanaHealthStatus {
+  status: 'healthy' | 'degraded' | 'down';
+  connected: boolean;
+  latencyMs: number;
+  version?: string;
+  database?: string;
+  checkedAt: string;
+}
+
 export interface AlertEvaluation {
   id: string;
   alertRuleId: string;
@@ -356,17 +694,36 @@ export interface DashboardDataResponse {
   };
   widgets: DashboardWidget[];
 }
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+  organizationId: string;
+  organization?: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+}
+
 const API_BASE = import.meta.env.VITE_API_URL
   ? `${String(import.meta.env.VITE_API_URL).replace(/\/+$/, '')}/api/v1`
   : '/api/v1';
 
 async function fetchJson<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('sentinel_token') : null;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(options.headers as Record<string, string> || {}),
+  };
+
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
     ...options,
+    headers,
   });
 
   if (!res.ok) {
@@ -382,6 +739,25 @@ async function fetchJson<T>(path: string, options: RequestInit = {}): Promise<T>
 }
 
 export const api = {
+  auth: {
+    login: (data: { email: string; password: string }) =>
+      fetchJson<{ accessToken: string; user: AuthUser }>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    register: (data: {
+      email: string;
+      password: string;
+      firstName: string;
+      lastName: string;
+      organizationName?: string;
+    }) =>
+      fetchJson<{ accessToken: string; user: AuthUser }>('/auth/register', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    getMe: () => fetchJson<AuthUser>('/auth/me'),
+  },
   getProjects: () => fetchJson<Project[]>('/projects'),
   getProject: (id: string) => fetchJson<Project>(`/projects/${id}`),
   createProject: (data: { name: string; description?: string }) =>
@@ -393,30 +769,101 @@ export const api = {
     fetchJson<{ success: boolean }>(`/projects/${id}`, {
       method: 'DELETE',
     }),
-  getApis: (projectId?: string) =>
-    fetchJson<Api[]>(`/apis${projectId ? `?projectId=${projectId}` : ''}`),
+  getApis: (filter?: string | { projectId?: string; service?: string; search?: string }) => {
+    let query = '';
+    if (typeof filter === 'string') {
+      query = `?projectId=${filter}`;
+    } else if (filter) {
+      const params = new URLSearchParams();
+      if (filter.projectId) params.set('projectId', filter.projectId);
+      if (filter.service) params.set('service', filter.service);
+      if (filter.search) params.set('search', filter.search);
+      const str = params.toString();
+      if (str) query = `?${str}`;
+    }
+    return fetchJson<Api[]>(`/apis${query}`);
+  },
   getApi: (id: string) => fetchJson<Api>(`/apis/${id}`),
-  createApi: (data: { name: string; description?: string; projectId: string }) =>
+  getApiDetails: (id: string) => fetchJson<ApiDetailsResponse>(`/apis/${id}/details`),
+  createApi: (data: {
+    name: string;
+    description?: string;
+    service?: string;
+    projectId?: string;
+    environments?: Array<{
+      name: string;
+      baseUrl: string;
+      type?: EnvironmentType;
+      variables?: Record<string, any>;
+    }>;
+  }) =>
     fetchJson<Api>('/apis', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  updateApi: (
+    id: string,
+    data: {
+      name?: string;
+      description?: string;
+      service?: string;
+      projectId?: string;
+    },
+  ) =>
+    fetchJson<Api>(`/apis/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteApi: (id: string) =>
+    fetchJson<{ message: string; id: string }>(`/apis/${id}`, {
+      method: 'DELETE',
+    }),
+  getReliabilityScore: (apiId: string, params?: { environmentId?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.environmentId) q.set('environmentId', params.environmentId);
+    if (params?.limit) q.set('limit', params.limit.toString());
+    const query = q.toString() ? `?${q.toString()}` : '';
+    return fetchJson<ReliabilityScoreBreakdown>(`/apis/${apiId}/reliability-score${query}`);
+  },
+  getReliabilityScoreHistory: (apiId: string, params?: { environmentId?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.environmentId) q.set('environmentId', params.environmentId);
+    if (params?.limit) q.set('limit', params.limit.toString());
+    const query = q.toString() ? `?${q.toString()}` : '';
+    return fetchJson<ReliabilityScoreRecord[]>(`/apis/${apiId}/reliability-score/history${query}`);
+  },
   getEnvironments: (apiId?: string) =>
     fetchJson<Environment[]>(`/environments${apiId ? `?apiId=${apiId}` : ''}`),
   getApiEnvironments: (apiId: string) =>
     fetchJson<Environment[]>(`/apis/${apiId}/environments`),
-  createEnvironment: (apiId: string, data: { name: string; baseUrl: string }) =>
+  createEnvironment: (
+    apiId: string,
+    data: {
+      name: string;
+      baseUrl: string;
+      type?: EnvironmentType;
+      variables?: Record<string, any>;
+    },
+  ) =>
     fetchJson<Environment>(`/apis/${apiId}/environments`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  updateEnvironment: (id: string, data: { name?: string; baseUrl?: string }) =>
+  updateEnvironment: (
+    id: string,
+    data: {
+      name?: string;
+      baseUrl?: string;
+      type?: EnvironmentType;
+      variables?: Record<string, any>;
+    },
+  ) =>
     fetchJson<Environment>(`/environments/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
   deleteEnvironment: (id: string) =>
-    fetchJson<Environment>(`/environments/${id}`, {
+    fetchJson<{ message: string; id: string }>(`/environments/${id}`, {
       method: 'DELETE',
     }),
   getMonitors: (filter?: { environmentId?: string; apiId?: string }) => {
@@ -542,6 +989,14 @@ export const api = {
     fetchJson<Incident>(`/incidents/${id}/acknowledge`, { method: 'POST' }),
   resolveIncident: (id: string) =>
     fetchJson<Incident>(`/incidents/${id}/resolve`, { method: 'POST' }),
+
+  // Customer Dashboard (Phase 10)
+  getCustomerDashboardSummary: () =>
+    fetchJson<CustomerDashboardSummary>('/customer-dashboard/summary'),
+
+  // Internal Infrastructure Health (Phase 13)
+  getGrafanaHealth: () =>
+    fetchJson<GrafanaHealthStatus>('/grafana/health'),
 
   // Dashboard & Custom Visualization APIs
   getMetricCatalog: () => fetchJson<MetricDefinition[]>('/dashboards/metrics/catalog'),
@@ -950,7 +1405,93 @@ export const api = {
     }),
   deleteSavedTesterRequest: (id: string) =>
     fetchJson<{ message: string }>(`/api-tester/requests/${id}`, { method: 'DELETE' }),
+  // -------------------------------------------------------------
+  // Contract & Schema Monitoring APIs
+  // -------------------------------------------------------------
+  getAllSchemas: () => fetchJson<ApiSchemaSummary[]>('/schemas'),
+  getAllSchemaChanges: (query?: { severity?: string; apiId?: string; limit?: number }) => {
+    const params = new URLSearchParams();
+    if (query?.severity) params.set('severity', query.severity);
+    if (query?.apiId) params.set('apiId', query.apiId);
+    if (query?.limit) params.set('limit', String(query.limit));
+    const qs = params.toString();
+    return fetchJson<SchemaChangeItem[]>(`/schemas/changes/all${qs ? `?${qs}` : ''}`);
+  },
+  getSchemaById: (schemaId: string) => fetchJson<ApiSchemaSummary>(`/schemas/${schemaId}`),
+  approveBaseline: (schemaId: string, versionId: string) =>
+    fetchJson<any>(`/schemas/${schemaId}/approve-baseline/${versionId}`, {
+      method: 'POST',
+    }),
+  checkResponseContract: (
+    apiId: string,
+    data: {
+      endpoint: string;
+      method?: string;
+      environmentId?: string;
+      statusCode?: number;
+      responseBody: any;
+      autoBaselineIfMissing?: boolean;
+    },
+  ) =>
+    fetchJson<any>(`/apis/${apiId}/schemas/check`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
+
+export interface ApiSchemaSummary {
+  id: string;
+  endpoint: string;
+  method: string;
+  organizationId: string;
+  apiId: string;
+  environmentId: string | null;
+  activeBaselineVersionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  api?: { id: string; name: string };
+  environment?: { id: string; name: string; baseUrl?: string } | null;
+  versions?: Array<{
+    id: string;
+    versionNumber: number;
+    isBaseline: boolean;
+    checksum: string | null;
+    normalizedSchema?: any;
+    samplePayload?: any;
+    createdAt: string;
+  }>;
+  changes?: Array<SchemaChangeItem>;
+  _count?: {
+    changes: number;
+    versions: number;
+  };
+}
+
+export interface SchemaChangeItem {
+  id: string;
+  schemaId: string;
+  versionId: string | null;
+  fieldPath: string;
+  changeType: 'FIELD_ADDED' | 'FIELD_REMOVED' | 'TYPE_CHANGED' | 'STRUCTURE_CHANGED' | 'REQUIRED_FIELD_MISSING' | string;
+  severity: 'INFO' | 'WARNING' | 'BREAKING';
+  previousType?: string | null;
+  currentType?: string | null;
+  description: string;
+  isBreaking: boolean;
+  detectedAt: string;
+  isAcknowledged: boolean;
+  schema?: {
+    id: string;
+    endpoint: string;
+    method: string;
+    api?: { id: string; name: string };
+    environment?: { id: string; name: string } | null;
+  };
+  version?: {
+    versionNumber: number;
+    createdAt: string;
+  };
+}
 
 // -------------------------------------------------------------
 // Phase 6 Notification Interfaces

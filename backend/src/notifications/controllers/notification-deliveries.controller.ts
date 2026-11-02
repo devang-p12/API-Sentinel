@@ -6,6 +6,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SecretEncryptionService } from '../services/secret-encryption.service';
+import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 
 @Controller()
 export class NotificationDeliveriesController {
@@ -16,6 +17,7 @@ export class NotificationDeliveriesController {
 
   @Get('notification-deliveries')
   async findAll(
+    @CurrentUser() user: any,
     @Query('status') status?: NotificationDeliveryStatus,
     @Query('eventType') eventType?: NotificationEventType,
     @Query('incidentId') incidentId?: string,
@@ -23,7 +25,9 @@ export class NotificationDeliveriesController {
     @Query('limit') limitStr?: string,
     @Query('offset') offsetStr?: string,
   ) {
-    const where: Prisma.NotificationDeliveryWhereInput = {};
+    const where: Prisma.NotificationDeliveryWhereInput = {
+      organizationId: user.organizationId,
+    };
     if (status) where.status = status;
     if (eventType) where.eventType = eventType;
     if (incidentId) where.incidentId = incidentId;
@@ -68,9 +72,15 @@ export class NotificationDeliveriesController {
   }
 
   @Get('notification-deliveries/:id')
-  async findOne(@Param('id') id: string) {
-    const item = await this.prisma.notificationDelivery.findUnique({
-      where: { id },
+  async findOne(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    const item = await this.prisma.notificationDelivery.findFirst({
+      where: {
+        id,
+        organizationId: user.organizationId,
+      },
       include: {
         contactPoint: true,
         policy: true,
@@ -97,9 +107,15 @@ export class NotificationDeliveriesController {
    * Incident-specific notification delivery audit history. (Section 21)
    */
   @Get('incidents/:id/notifications')
-  async findForIncident(@Param('id') incidentId: string) {
+  async findForIncident(
+    @CurrentUser() user: any,
+    @Param('id') incidentId: string,
+  ) {
     return this.prisma.notificationDelivery.findMany({
-      where: { incidentId },
+      where: {
+        incidentId,
+        organizationId: user.organizationId,
+      },
       include: {
         contactPoint: {
           select: { id: true, name: true, type: true },

@@ -1,5 +1,7 @@
 import { Injectable, OnApplicationBootstrap, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { UserRole } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class BootstrapService implements OnApplicationBootstrap {
@@ -10,6 +12,7 @@ export class BootstrapService implements OnApplicationBootstrap {
   async onApplicationBootstrap() {
     const orgCount = await this.prisma.organization.count();
     if (orgCount === 0) {
+      const knownHash = bcrypt.hashSync('sentinel123', 10);
       const defaultOrg = await this.prisma.organization.create({
         data: {
           name: 'Acme Observability Corp',
@@ -17,16 +20,26 @@ export class BootstrapService implements OnApplicationBootstrap {
           users: {
             create: {
               email: 'admin@sentinel.local',
-              passwordHash: '$2b$10$dummyHashForDevTestingOnly',
+              passwordHash: knownHash,
               firstName: 'Sentinel',
               lastName: 'Admin',
-              role: 'OWNER',
+              role: UserRole.OWNER,
             },
           },
         },
         include: { users: true },
       });
-      this.logger.log(`Initialized default organization: ${defaultOrg.name} (${defaultOrg.id})`);
+
+      const user = defaultOrg.users[0];
+      await this.prisma.membership.create({
+        data: {
+          userId: user.id,
+          organizationId: defaultOrg.id,
+          role: UserRole.OWNER,
+        },
+      });
+
+      this.logger.log(`Initialized default organization: ${defaultOrg.name} (${defaultOrg.id}) with OWNER membership`);
     }
   }
 }

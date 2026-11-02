@@ -27,9 +27,12 @@ export class IncidentsService {
     };
   }
 
-  async findAll(query: QueryIncidentsDto = {}) {
+  async findAll(query: QueryIncidentsDto = {}, organizationId?: string) {
     const where: Prisma.IncidentWhereInput = {};
 
+    if (organizationId) {
+      where.organizationId = organizationId;
+    }
     if (query.status) {
       where.status = query.status;
     }
@@ -82,8 +85,11 @@ export class IncidentsService {
     };
   }
 
-  async getSummary(projectId?: string) {
-    const where: Prisma.IncidentWhereInput = projectId ? { projectId } : {};
+  async getSummary(organizationId?: string, projectId?: string) {
+    const where: Prisma.IncidentWhereInput = {
+      ...(organizationId ? { organizationId } : {}),
+      ...(projectId ? { projectId } : {}),
+    };
 
     const [open, acknowledged, resolved, total] = await Promise.all([
       this.prisma.incident.count({ where: { ...where, status: IncidentStatus.OPEN } }),
@@ -100,9 +106,12 @@ export class IncidentsService {
     };
   }
 
-  async findOne(id: string) {
-    const incident = await this.prisma.incident.findUnique({
-      where: { id },
+  async findOne(id: string, organizationId?: string) {
+    const incident = await this.prisma.incident.findFirst({
+      where: {
+        id,
+        ...(organizationId ? { organizationId } : {}),
+      },
       include: {
         project: { select: { id: true, name: true } },
         api: { select: { id: true, name: true } },
@@ -130,11 +139,8 @@ export class IncidentsService {
     return this.mapIncidentWithDuration(incident);
   }
 
-  async acknowledge(id: string, user?: { id?: string; name?: string }) {
-    const incident = await this.prisma.incident.findUnique({ where: { id } });
-    if (!incident) {
-      throw new NotFoundException(`Incident with ID ${id} not found`);
-    }
+  async acknowledge(id: string, user?: { id?: string; name?: string }, organizationId?: string) {
+    const incident = await this.findOne(id, organizationId);
 
     if (incident.status === IncidentStatus.RESOLVED) {
       return this.mapIncidentWithDuration(incident);
@@ -167,14 +173,11 @@ export class IncidentsService {
       return inc;
     });
 
-    return this.findOne(updated.id);
+    return this.findOne(updated.id, organizationId);
   }
 
-  async resolve(id: string, user?: { id?: string; name?: string }) {
-    const incident = await this.prisma.incident.findUnique({ where: { id } });
-    if (!incident) {
-      throw new NotFoundException(`Incident with ID ${id} not found`);
-    }
+  async resolve(id: string, user?: { id?: string; name?: string }, organizationId?: string) {
+    const incident = await this.findOne(id, organizationId);
 
     if (incident.status === IncidentStatus.RESOLVED) {
       return this.mapIncidentWithDuration(incident);
@@ -197,7 +200,7 @@ export class IncidentsService {
         data: {
           incidentId: id,
           type: IncidentEventType.RESOLVED,
-          message: `Incident manually resolved by ${actorName}`,
+          message: `Incident resolved by ${actorName}`,
           actorType: ActorType.USER,
           actorId: user?.id ?? null,
           createdAt: now,
@@ -207,35 +210,45 @@ export class IncidentsService {
       return inc;
     });
 
+    // Notify on incident resolution
     if (this.notificationRoutingService) {
       try {
         await this.notificationRoutingService.routeIncidentNotification(
-          id,
+          incident.id,
           NotificationEventType.RECOVERY,
         );
       } catch (err: any) {
-        this.logger.error(
-          `[NotificationRouting] Failed to route manual RECOVERY notification for Incident ${id}: ${err.message}`,
-        );
+        this.logger.warn(`Could not dispatch resolution notification: ${err.message}`);
       }
     }
 
-    return this.findOne(updated.id);
+    return this.findOne(updated.id, organizationId);
   }
 
-  async getTimeline(id: string) {
-    await this.findOne(id);
+  async getTimeline(id: string, organizationId?: string) {
+    const incident = await this.findOne(id, organizationId);
+
     return this.prisma.incidentEvent.findMany({
-      where: { incidentId: id },
-      orderBy: { createdAt: 'asc' },
+      where: { incidentId: incident.id },
+      orderBy: { createdAt: 'desc' },
     });
   }
 
-  async getAlerts(id: string) {
-    const incident = await this.findOne(id);
-    return incident.alerts.map((a: any) => ({
-      ...a.alertInstance,
-      attachedAt: a.createdAt,
-    }));
+  async getAlerts(id: string, organizationId?: string) {
+    const incident = await this.findOne(id, organizationId);
+
+    const alerts = await this.prisma.incidentAlert.findMany({
+      where: { incidentId: incident.id },
+      include: {
+        alertInstance: {
+          include: {
+            alertRule: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return alerts.map((a) => a.alertInstance);
   }
 }

@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsEnum,
   IsNumber,
@@ -25,6 +26,10 @@ export class UpdateAlertRuleDto {
   @IsString()
   @IsOptional()
   metric?: string;
+
+  @IsString()
+  @IsOptional()
+  operator?: string;
 
   @IsString()
   @IsOptional()
@@ -59,6 +64,15 @@ export class UpdateAlertRuleDto {
   @IsEnum(AlertSeverity)
   @IsOptional()
   severity?: AlertSeverity;
+
+  @IsArray()
+  @IsOptional()
+  notificationChannels?: any[];
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  cooldownSeconds?: number;
 
   @IsObject()
   @IsOptional()

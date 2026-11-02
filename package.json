@@ -1,0 +1,28 @@
+{
+  "name": "sentinel-monorepo",
+  "version": "1.0.0",
+  "description": "API Sentinel - Real-Time API Observability, Automated Probing & Load Testing Platform",
+  "private": true,
+  "scripts": {
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:logs": "docker compose logs -f",
+    "backend:install": "cd backend && npm install",
+    "backend:db:generate": "cd backend && npx prisma generate",
+    "backend:db:push": "cd backend && npx prisma db push",
+    "backend:db:migrate": "cd backend && npx prisma migrate deploy",
+    "backend:dev": "cd backend && npm run start:dev",
+    "backend:build": "cd backend && npm run build",
+    "backend:start": "cd backend && npm run start:prod",
+    "frontend:install": "cd frontend && pnpm install",
+    "frontend:dev": "cd frontend && pnpm dev",
+    "frontend:build": "cd frontend && pnpm build",
+    "demo:start": "cd demo-api && node server.js",
+    "test:verify": "node test-verification.js",
+    "test:demo": "node test-demo-flow.js",
+    "test:monitors": "node test-monitors.js",
+    "test:metrics": "node test-phase3-metrics.js",
+    "test:alerts": "node test-phase5a-alerts.js",
+    "test:incidents": "node test-phase5b-incidents.js"
+  }
+}

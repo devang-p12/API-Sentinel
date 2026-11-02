@@ -37,10 +37,11 @@ async function run() {
 
   // 1. Create Project
   console.log('[Step 1] Creating Project...');
+  const runId = Date.now();
   const project = await request('/projects', {
     method: 'POST',
     body: JSON.stringify({
-      name: 'E-Commerce Platform Core',
+      name: `E-Commerce Platform Core ${runId}`,
       description: 'Core backend services for Sentinel observability',
     }),
   });

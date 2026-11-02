@@ -6,21 +6,12 @@ import { CreateProjectDto } from './dto/create-project.dto';
 export class ProjectsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(dto: CreateProjectDto) {
-    let orgId = dto.organizationId;
-    if (!orgId) {
-      const defaultOrg = await this.prisma.organization.findFirst();
-      if (!defaultOrg) {
-        throw new NotFoundException('No organization found. Please bootstrap an organization first.');
-      }
-      orgId = defaultOrg.id;
-    }
-
+  async create(dto: CreateProjectDto, organizationId: string) {
     return this.prisma.project.create({
       data: {
         name: dto.name,
         description: dto.description,
-        organizationId: orgId,
+        organizationId,
       },
       include: {
         apis: true,
@@ -28,8 +19,9 @@ export class ProjectsService {
     });
   }
 
-  async findAll() {
+  async findAll(organizationId: string) {
     return this.prisma.project.findMany({
+      where: { organizationId },
       include: {
         apis: {
           include: {
@@ -41,9 +33,9 @@ export class ProjectsService {
     });
   }
 
-  async findOne(id: string) {
-    const project = await this.prisma.project.findUnique({
-      where: { id },
+  async findOne(id: string, organizationId: string) {
+    const project = await this.prisma.project.findFirst({
+      where: { id, organizationId },
       include: {
         apis: {
           include: {
@@ -64,8 +56,8 @@ export class ProjectsService {
     return project;
   }
 
-  async remove(id: string) {
-    await this.findOne(id);
+  async remove(id: string, organizationId: string) {
+    await this.findOne(id, organizationId);
     return this.prisma.project.delete({
       where: { id },
     });

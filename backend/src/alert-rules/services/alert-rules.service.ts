@@ -6,64 +6,138 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { getMetricDefinition } from '../../dashboards/metric-registry';
+import {
+  isMetricSupported,
+  normalizeAlertMetric,
+  normalizeOperator,
+} from '../alert-rules.constants';
 import { CreateAlertRuleDto } from '../dto/create-alert-rule.dto';
 import { UpdateAlertRuleDto } from '../dto/update-alert-rule.dto';
 import { QueryAlertRulesDto } from '../dto/query-alert-rules.dto';
 import { AlertEvaluationService } from './alert-evaluation.service';
+import { GrafanaAlertsService } from './grafana-alerts.service';
+import { AlertCondition, AlertSeverity } from '@prisma/client';
 
 @Injectable()
 export class AlertRulesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly evaluationService: AlertEvaluationService,
+    private readonly grafanaAlertsService: GrafanaAlertsService,
   ) {}
 
   /**
-   * Creates an AlertRule with multi-tenant hierarchy validation.
+   * Evaluates an operator against a value and threshold.
+   */
+  private evaluateCondition(
+    val: number,
+    operator: string,
+    threshold: number,
+  ): boolean {
+    switch (operator) {
+      case '>':
+      case 'GREATER_THAN':
+        return val > threshold;
+      case '>=':
+      case 'GREATER_THAN_OR_EQUAL':
+        return val >= threshold;
+      case '<':
+      case 'LESS_THAN':
+        return val < threshold;
+      case '<=':
+      case 'LESS_THAN_OR_EQUAL':
+        return val <= threshold;
+      case '==':
+      case '=':
+      case 'EQUAL':
+        return val === threshold;
+      case '!=':
+      case 'NOT_EQUAL':
+        return val !== threshold;
+      default:
+        return val > threshold;
+    }
+  }
+
+  /**
+   * Creates an AlertRule with multi-tenant hierarchy validation,
+   * creates the corresponding Grafana Alert Rule, and records an AlertEvent.
    */
   async create(dto: CreateAlertRuleDto, organizationId?: string) {
-    // 1. Validate metric exists in MetricRegistry
+    // 1. Validate metric: either supported Phase 9 metric or in MetricRegistry
+    const isSupported = isMetricSupported(dto.metric);
     const metricDef = getMetricDefinition(dto.metric);
-    if (!metricDef) {
+    if (!isSupported && !metricDef) {
       throw new BadRequestException(`Unsupported metric: "${dto.metric}"`);
     }
 
-    // 2. Validate Project existence and tenant isolation
-    const project = await this.prisma.project.findUnique({
-      where: { id: dto.projectId },
-    });
-    if (!project) {
-      throw new NotFoundException(`Project with ID ${dto.projectId} not found`);
-    }
-    if (organizationId && project.organizationId !== organizationId) {
-      throw new ForbiddenException('You do not have access to this project');
-    }
+    const normalizedMetric = isSupported
+      ? normalizeAlertMetric(dto.metric)
+      : dto.metric;
 
-    // 3. Validate hierarchical dimensions
+    // 2. Normalize operator & condition
+    const opInfo = normalizeOperator(dto.operator || dto.condition);
+
+    // 3. Resolve Organization and Project/API context
+    let targetOrgId = organizationId || dto.organizationId;
+    let resolvedProjectId = dto.projectId;
+
     if (dto.apiId) {
-      const api = await this.prisma.api.findUnique({ where: { id: dto.apiId } });
-      if (!api || api.projectId !== project.id) {
-        throw new BadRequestException(`API ${dto.apiId} does not belong to Project ${project.id}`);
+      const api = await this.prisma.api.findFirst({
+        where: {
+          id: dto.apiId,
+          ...(targetOrgId ? { organizationId: targetOrgId } : {}),
+        },
+      });
+      if (!api) {
+        throw new NotFoundException(`API with ID ${dto.apiId} not found`);
+      }
+      targetOrgId = api.organizationId;
+      if (!resolvedProjectId && api.projectId) {
+        resolvedProjectId = api.projectId;
       }
     }
 
+    if (resolvedProjectId) {
+      const project = await this.prisma.project.findFirst({
+        where: {
+          id: resolvedProjectId,
+          ...(targetOrgId ? { organizationId: targetOrgId } : {}),
+        },
+      });
+      if (!project) {
+        throw new NotFoundException(`Project with ID ${resolvedProjectId} not found`);
+      }
+      targetOrgId = project.organizationId;
+    }
+
+    if (!targetOrgId) {
+      throw new BadRequestException('Organization ID is required');
+    }
+
+    // 4. Validate Environment if provided
     if (dto.environmentId) {
-      const env = await this.prisma.environment.findUnique({
-        where: { id: dto.environmentId },
-        include: { api: true },
+      const env = await this.prisma.environment.findFirst({
+        where: {
+          id: dto.environmentId,
+          organizationId: targetOrgId,
+        },
       });
-      if (!env || env.api.projectId !== project.id) {
-        throw new BadRequestException(`Environment ${dto.environmentId} is invalid for this project`);
+      if (!env) {
+        throw new BadRequestException(`Environment ${dto.environmentId} not found`);
       }
     }
 
+    // 5. Validate Monitor if provided
     if (dto.monitorId) {
-      const mon = await this.prisma.monitor.findUnique({
-        where: { id: dto.monitorId },
-        include: { environment: { include: { api: true } } },
+      const mon = await this.prisma.monitor.findFirst({
+        where: {
+          id: dto.monitorId,
+          ...(resolvedProjectId ? { environment: { api: { projectId: resolvedProjectId } } } : {}),
+        },
       });
-      if (!mon || mon.environment.api.projectId !== project.id) {
-        throw new BadRequestException(`Monitor ${dto.monitorId} is invalid for this project`);
+      if (!mon) {
+        throw new BadRequestException(`Monitor ${dto.monitorId} is invalid`);
       }
     }
 
@@ -71,22 +145,44 @@ export class AlertRulesService {
       this.validateNotificationConfig(dto.notificationConfig);
     }
 
-    return this.prisma.alertRule.create({
+    // 6. Create internal Grafana Alert Rule via Grafana API
+    const grafanaRuleUid = await this.grafanaAlertsService.createAlertRule({
+      name: dto.name.trim(),
+      metric: normalizedMetric,
+      operator: opInfo.symbol,
+      threshold: dto.threshold,
+      duration: dto.duration ?? 0,
+      severity: dto.severity ?? 'WARNING',
+      enabled: dto.enabled ?? true,
+      labels: {
+        organization_id: targetOrgId,
+        ...(dto.apiId ? { api_id: dto.apiId } : {}),
+        ...(dto.environmentId ? { environment_id: dto.environmentId } : {}),
+      },
+    });
+
+    // 7. Store logical alert configuration in PostgreSQL
+    const rule = await this.prisma.alertRule.create({
       data: {
         name: dto.name.trim(),
         description: dto.description?.trim(),
-        projectId: dto.projectId,
-        metric: dto.metric,
+        projectId: resolvedProjectId ?? null,
+        organizationId: targetOrgId,
+        metric: normalizedMetric,
         apiId: dto.apiId ?? null,
         environmentId: dto.environmentId ?? null,
         monitorId: dto.monitorId ?? null,
-        condition: dto.condition,
+        operator: opInfo.symbol,
+        condition: opInfo.condition as AlertCondition,
         threshold: dto.threshold,
         duration: dto.duration ?? 0,
         evaluationInterval: dto.evaluationInterval ?? 60,
         severity: dto.severity ?? 'WARNING',
         labels: dto.labels ?? {},
         notificationConfig: dto.notificationConfig ?? {},
+        notificationChannels: dto.notificationChannels ?? [],
+        grafanaRuleUid,
+        cooldownSeconds: dto.cooldownSeconds ?? 300,
         enabled: dto.enabled ?? true,
         createdBy: dto.createdBy,
       },
@@ -97,6 +193,25 @@ export class AlertRulesService {
         monitor: true,
       },
     });
+
+    // 8. Record initial AlertEvent
+    await this.prisma.alertEvent.create({
+      data: {
+        organizationId: targetOrgId,
+        alertRuleId: rule.id,
+        type: 'CREATED',
+        message: `Alert rule "${rule.name}" created`,
+        severity: rule.severity,
+        threshold: rule.threshold,
+        metadata: {
+          metric: rule.metric,
+          operator: rule.operator,
+          grafanaRuleUid,
+        },
+      },
+    });
+
+    return rule;
   }
 
   async findAll(query: QueryAlertRulesDto, organizationId?: string) {
@@ -112,7 +227,7 @@ export class AlertRulesService {
     }
 
     if (organizationId) {
-      where.project = { organizationId };
+      where.organizationId = organizationId;
     }
 
     return this.prisma.alertRule.findMany({
@@ -147,23 +262,16 @@ export class AlertRulesService {
             evaluatedAt: true,
           },
         },
-        deliveries: {
+        events: {
           orderBy: { createdAt: 'desc' },
-          take: 1,
-          select: {
-            id: true,
-            status: true,
-            sentAt: true,
-            createdAt: true,
-            recipient: true,
-            eventType: true,
-          },
+          take: 5,
         },
         _count: {
           select: {
             instances: true,
             evaluations: true,
             deliveries: true,
+            events: true,
           },
         },
       },
@@ -172,27 +280,21 @@ export class AlertRulesService {
   }
 
   async findOne(id: string, organizationId?: string) {
-    const rule = await this.prisma.alertRule.findUnique({
-      where: { id },
+    const rule = await this.prisma.alertRule.findFirst({
+      where: {
+        id,
+        ...(organizationId ? { organizationId } : {}),
+      },
       include: {
         project: true,
         api: true,
         environment: true,
         monitor: true,
+        events: {
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        },
         instances: {
-          include: {
-            incidentAlerts: {
-              include: {
-                incident: {
-                  include: {
-                    project: { select: { id: true, name: true } },
-                    api: { select: { id: true, name: true } },
-                    environment: { select: { id: true, name: true } },
-                  },
-                },
-              },
-            },
-          },
           orderBy: { createdAt: 'desc' },
           take: 20,
         },
@@ -211,14 +313,14 @@ export class AlertRulesService {
       throw new NotFoundException(`AlertRule ${id} not found`);
     }
 
-    if (organizationId && rule.project.organizationId !== organizationId) {
-      throw new ForbiddenException('You do not have access to this alert rule');
-    }
-
     return rule;
   }
 
-  async findEvaluations(ruleId: string, limit = 50) {
+  async findEvaluations(ruleId: string, limit = 50, organizationId?: string) {
+    if (organizationId) {
+      await this.findOne(ruleId, organizationId);
+    }
+
     return this.prisma.alertEvaluation.findMany({
       where: { alertRuleId: ruleId },
       orderBy: { evaluatedAt: 'desc' },
@@ -229,30 +331,54 @@ export class AlertRulesService {
   async update(id: string, dto: UpdateAlertRuleDto, organizationId?: string) {
     const existing = await this.findOne(id, organizationId);
 
+    let normalizedMetric: string | undefined = undefined;
     if (dto.metric) {
-      const def = getMetricDefinition(dto.metric);
-      if (!def) throw new BadRequestException(`Unsupported metric: "${dto.metric}"`);
+      const isSupported = isMetricSupported(dto.metric);
+      const metricDef = getMetricDefinition(dto.metric);
+      if (!isSupported && !metricDef) {
+        throw new BadRequestException(`Unsupported metric: "${dto.metric}"`);
+      }
+      normalizedMetric = isSupported ? normalizeAlertMetric(dto.metric) : dto.metric;
+    }
+
+    let opInfo: { symbol: string; condition: string } | undefined = undefined;
+    if (dto.operator || dto.condition) {
+      opInfo = normalizeOperator(dto.operator || dto.condition);
     }
 
     if (dto.notificationConfig !== undefined) {
       this.validateNotificationConfig(dto.notificationConfig);
     }
 
-    return this.prisma.alertRule.update({
+    // Sync changes to Grafana alert rule
+    if (existing.grafanaRuleUid) {
+      await this.grafanaAlertsService.updateAlertRule(existing.grafanaRuleUid, {
+        name: dto.name,
+        threshold: dto.threshold,
+        operator: opInfo?.symbol,
+        duration: dto.duration,
+        severity: dto.severity,
+        enabled: dto.enabled,
+      });
+    }
+
+    const updated = await this.prisma.alertRule.update({
       where: { id: existing.id },
       data: {
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
         ...(dto.description !== undefined ? { description: dto.description?.trim() } : {}),
         ...(dto.projectId !== undefined ? { projectId: dto.projectId } : {}),
-        ...(dto.metric !== undefined ? { metric: dto.metric } : {}),
+        ...(normalizedMetric !== undefined ? { metric: normalizedMetric } : {}),
         ...(dto.apiId !== undefined ? { apiId: dto.apiId } : {}),
         ...(dto.environmentId !== undefined ? { environmentId: dto.environmentId } : {}),
         ...(dto.monitorId !== undefined ? { monitorId: dto.monitorId } : {}),
-        ...(dto.condition !== undefined ? { condition: dto.condition } : {}),
+        ...(opInfo ? { operator: opInfo.symbol, condition: opInfo.condition as AlertCondition } : {}),
         ...(dto.threshold !== undefined ? { threshold: dto.threshold } : {}),
         ...(dto.duration !== undefined ? { duration: dto.duration } : {}),
         ...(dto.evaluationInterval !== undefined ? { evaluationInterval: dto.evaluationInterval } : {}),
         ...(dto.severity !== undefined ? { severity: dto.severity } : {}),
+        ...(dto.notificationChannels !== undefined ? { notificationChannels: dto.notificationChannels } : {}),
+        ...(dto.cooldownSeconds !== undefined ? { cooldownSeconds: dto.cooldownSeconds } : {}),
         ...(dto.labels !== undefined ? { labels: dto.labels } : {}),
         ...(dto.notificationConfig !== undefined ? { notificationConfig: dto.notificationConfig } : {}),
         ...(dto.enabled !== undefined ? { enabled: dto.enabled } : {}),
@@ -264,6 +390,220 @@ export class AlertRulesService {
         monitor: true,
       },
     });
+
+    // Record AlertEvent
+    await this.prisma.alertEvent.create({
+      data: {
+        organizationId: existing.organizationId,
+        alertRuleId: existing.id,
+        type: 'UPDATED',
+        message: `Alert rule "${updated.name}" updated`,
+        severity: updated.severity,
+        threshold: updated.threshold,
+        metadata: {
+          updatedFields: Object.keys(dto),
+        },
+      },
+    });
+
+    return updated;
+  }
+
+  async delete(id: string, organizationId?: string) {
+    const existing = await this.findOne(id, organizationId);
+
+    // Delete Grafana alert rule
+    if (existing.grafanaRuleUid) {
+      await this.grafanaAlertsService.deleteAlertRule(existing.grafanaRuleUid);
+    }
+
+    return this.prisma.alertRule.delete({
+      where: { id: existing.id },
+    });
+  }
+
+  async enable(id: string, organizationId?: string) {
+    const existing = await this.findOne(id, organizationId);
+
+    if (existing.grafanaRuleUid) {
+      await this.grafanaAlertsService.toggleAlertRule(existing.grafanaRuleUid, true);
+    }
+
+    const updated = await this.prisma.alertRule.update({
+      where: { id: existing.id },
+      data: { enabled: true },
+    });
+
+    await this.prisma.alertEvent.create({
+      data: {
+        organizationId: existing.organizationId,
+        alertRuleId: existing.id,
+        type: 'ENABLED',
+        message: `Alert rule "${existing.name}" enabled`,
+        severity: existing.severity,
+      },
+    });
+
+    return updated;
+  }
+
+  async disable(id: string, organizationId?: string) {
+    const existing = await this.findOne(id, organizationId);
+
+    if (existing.grafanaRuleUid) {
+      await this.grafanaAlertsService.toggleAlertRule(existing.grafanaRuleUid, false);
+    }
+
+    const updated = await this.prisma.alertRule.update({
+      where: { id: existing.id },
+      data: { enabled: false },
+    });
+
+    await this.prisma.alertEvent.create({
+      data: {
+        organizationId: existing.organizationId,
+        alertRuleId: existing.id,
+        type: 'DISABLED',
+        message: `Alert rule "${existing.name}" disabled`,
+        severity: existing.severity,
+      },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Evaluates an alert rule against an observed metric value,
+   * enforcing condition evaluation and deduplication / cooldown suppression.
+   */
+  async evaluateRule(ruleId: string, metricValue: number, organizationId?: string) {
+    const rule = await this.findOne(ruleId, organizationId);
+
+    if (!rule.enabled) {
+      return {
+        triggered: false,
+        suppressed: false,
+        reason: 'Alert rule is disabled',
+      };
+    }
+
+    const operator = rule.operator || rule.condition || '>';
+    const isBreached = this.evaluateCondition(metricValue, operator, rule.threshold);
+
+    if (!isBreached) {
+      return {
+        triggered: false,
+        suppressed: false,
+        metricValue,
+        threshold: rule.threshold,
+        operator,
+      };
+    }
+
+    // Condition is breached! Check cooldown / deduplication window
+    const now = new Date();
+    const cooldownMs = (rule.cooldownSeconds ?? 300) * 1000;
+    const isWithinCooldown =
+      rule.lastTriggeredAt &&
+      now.getTime() - rule.lastTriggeredAt.getTime() < cooldownMs;
+
+    if (isWithinCooldown) {
+      const remainingSeconds = Math.ceil(
+        (cooldownMs - (now.getTime() - rule.lastTriggeredAt!.getTime())) / 1000,
+      );
+
+      const event = await this.prisma.alertEvent.create({
+        data: {
+          organizationId: rule.organizationId,
+          alertRuleId: rule.id,
+          type: 'SUPPRESSED_COOLDOWN',
+          metricValue,
+          threshold: rule.threshold,
+          severity: rule.severity,
+          message: `Alert "${rule.name}" breached threshold (${metricValue} ${operator} ${rule.threshold}) but suppressed due to active cooldown (${remainingSeconds}s remaining)`,
+          metadata: {
+            cooldownSeconds: rule.cooldownSeconds,
+            remainingSeconds,
+          },
+        },
+      });
+
+      return {
+        triggered: true,
+        suppressed: true,
+        reason: 'Cooldown active',
+        cooldownRemainingSeconds: remainingSeconds,
+        event,
+      };
+    }
+
+    // Cooldown expired or first trigger: Fire alert!
+    await this.prisma.alertRule.update({
+      where: { id: rule.id },
+      data: { lastTriggeredAt: now },
+    });
+
+    const event = await this.prisma.alertEvent.create({
+      data: {
+        organizationId: rule.organizationId,
+        alertRuleId: rule.id,
+        type: 'FIRING',
+        metricValue,
+        threshold: rule.threshold,
+        severity: rule.severity,
+        message: `Alert "${rule.name}" FIRING: observed value ${metricValue} breached threshold ${rule.threshold} (${operator})`,
+        metadata: {
+          operator,
+          notificationChannels: rule.notificationChannels,
+        },
+      },
+    });
+
+    return {
+      triggered: true,
+      suppressed: false,
+      event,
+    };
+  }
+
+  /**
+   * Retrieves alert event history for a specific rule.
+   */
+  async findEvents(ruleId: string, organizationId?: string, limit = 50) {
+    if (organizationId) {
+      await this.findOne(ruleId, organizationId);
+    }
+
+    return this.prisma.alertEvent.findMany({
+      where: {
+        alertRuleId: ruleId,
+        ...(organizationId ? { organizationId } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(limit, 200),
+    });
+  }
+
+  /**
+   * Retrieves alert event history across all rules in an organization.
+   */
+  async findAllEvents(organizationId: string, limit = 50) {
+    return this.prisma.alertEvent.findMany({
+      where: { organizationId },
+      include: {
+        alertRule: {
+          select: {
+            id: true,
+            name: true,
+            metric: true,
+            severity: true,
+            grafanaRuleUid: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(limit, 200),
+    });
   }
 
   private validateNotificationConfig(config?: Record<string, any>) {
@@ -274,7 +614,8 @@ export class AlertRulesService {
         throw new BadRequestException('Add at least one email recipient.');
       }
 
-      const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+      const emailRegex =
+        /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
       const seen = new Set<string>();
 
       for (const r of email.recipients) {
@@ -290,32 +631,11 @@ export class AlertRulesService {
       }
 
       if (email.onFiring === false && email.onResolved === false) {
-        throw new BadRequestException('At least one notification event (Alert fires or Alert resolves) must be selected.');
+        throw new BadRequestException(
+          'At least one notification event (Alert fires or Alert resolves) must be selected.',
+        );
       }
     }
-  }
-
-  async delete(id: string, organizationId?: string) {
-    const existing = await this.findOne(id, organizationId);
-    return this.prisma.alertRule.delete({
-      where: { id: existing.id },
-    });
-  }
-
-  async enable(id: string, organizationId?: string) {
-    const existing = await this.findOne(id, organizationId);
-    return this.prisma.alertRule.update({
-      where: { id: existing.id },
-      data: { enabled: true },
-    });
-  }
-
-  async disable(id: string, organizationId?: string) {
-    const existing = await this.findOne(id, organizationId);
-    return this.prisma.alertRule.update({
-      where: { id: existing.id },
-      data: { enabled: false },
-    });
   }
 
   async test(id: string, organizationId?: string) {

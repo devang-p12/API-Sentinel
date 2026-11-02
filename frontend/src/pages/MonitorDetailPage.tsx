@@ -181,6 +181,8 @@ export function MonitorDetailPage() {
       timeoutMs: data.timeout * 1000,
       expectedStatusCode: data.expectedStatus,
       isActive: data.enabled,
+      headers: data.headers,
+      body: data.body,
     })
     setIsEditOpen(false)
     await fetchMonitor()
@@ -599,6 +601,28 @@ export function MonitorDetailPage() {
                   <span>BullMQ + Redis Worker</span>
                 </div>
               </div>
+
+              {monitor.headers && Object.keys(monitor.headers).length > 0 && (
+                <div className="pt-2 border-t border-border space-y-1">
+                  <span className="text-foreground font-semibold block text-[11px]">
+                    Configured Headers &amp; Authentication:
+                  </span>
+                  <pre className="p-2 bg-background border border-border text-[11px] font-mono overflow-x-auto text-foreground max-h-32">
+                    {JSON.stringify(monitor.headers, null, 2)}
+                  </pre>
+                </div>
+              )}
+
+              {monitor.body && (
+                <div className="pt-2 border-t border-border space-y-1">
+                  <span className="text-foreground font-semibold block text-[11px]">
+                    Request Payload (Body):
+                  </span>
+                  <pre className="p-2 bg-background border border-border text-[11px] font-mono overflow-x-auto text-foreground max-h-32">
+                    {monitor.body}
+                  </pre>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -7,9 +7,12 @@ import { MonitorExecutionService } from './services/monitor-execution.service';
 import { MonitorWorker } from './workers/monitor.worker';
 
 import { AlertRulesModule } from '../alert-rules/alert-rules.module';
+import { RequestExecutionModule } from '../request-execution/request-execution.module';
+import { HealthEvaluationModule } from '../health-evaluation/health-evaluation.module';
+import { MetricsModule } from '../metrics/metrics.module';
 
 @Module({
-  imports: [AlertRulesModule],
+  imports: [AlertRulesModule, RequestExecutionModule, HealthEvaluationModule, MetricsModule],
   controllers: [MonitorsController],
   providers: [
     MonitorsService,

@@ -18,6 +18,14 @@ enum UserRole {
   VIEWER
 }
 
+enum EnvironmentType {
+  DEVELOPMENT
+  UAT
+  STAGING
+  PRODUCTION
+  CUSTOM
+}
+
 enum HttpMethod {
   GET
   POST
@@ -48,6 +56,7 @@ enum IncidentEventType {
   ACKNOWLEDGED
   SEVERITY_CHANGED
   RESOLVED
+  FAILURE_RECORDED
 }
 
 enum ActorType {
@@ -91,6 +100,20 @@ enum LoadTestMode {
   REQUEST_COUNT
 }
 
+enum SchemaChangeSeverity {
+  INFO
+  WARNING
+  BREAKING
+}
+
+enum SchemaChangeType {
+  FIELD_ADDED
+  FIELD_REMOVED
+  TYPE_CHANGED
+  STRUCTURE_CHANGED
+  REQUIRED_FIELD_MISSING
+}
+
 // -------------------------------------------------------------
 // DOMAIN MODELS
 // -------------------------------------------------------------
@@ -103,12 +126,44 @@ model Organization {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   users                User[]
+  memberships          Membership[]
   projects             Project[]
+  apis                 Api[]
+  environments         Environment[]
+  monitors             Monitor[]
+  dashboards           Dashboard[]
+  alertRules           AlertRule[]
+  incidents            Incident[]
+  loadTests            LoadTest[]
   contactPoints        ContactPoint[]
   notificationPolicies NotificationPolicy[]
   notificationSilences NotificationSilence[]
+  apiCollections       ApiCollection[]
+  savedRequests        SavedApiRequest[]
+  requestHistories     ApiRequestHistory[]
+  monitorConfigs       MonitorConfig[]
+  monitorResults       MonitorResult[]
+  reliabilityScores    ReliabilityScoreRecord[]
+  apiSchemas           ApiSchema[]
+  alertEvents          AlertEvent[]
 
   @@map("organizations")
+}
+
+model Membership {
+  id             String       @id @default(uuid())
+  userId         String       @map("user_id")
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role           UserRole     @default(MEMBER)
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  @@unique([userId, organizationId])
+  @@index([userId])
+  @@index([organizationId])
+  @@map("memberships")
 }
 
 model User {
@@ -122,6 +177,8 @@ model User {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  memberships Membership[]
 
   @@index([organizationId])
   @@map("users")
@@ -151,45 +208,61 @@ model Project {
 }
 
 model Api {
-  id          String   @id @default(uuid())
-  name        String
-  description String?
-  projectId   String   @map("project_id")
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id             String       @id @default(uuid())
+  name           String
+  description    String?
+  service        String?      @map("service")
+  projectId      String?      @map("project_id")
+  project        Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
 
-  environments     Environment[]
-  alertRules       AlertRule[]
-  incidents        Incident[]
-  loadTests        LoadTest[]
-  savedRequests    SavedApiRequest[]
-  requestHistories ApiRequestHistory[]
+  environments      Environment[]
+  monitors          Monitor[]
+  monitorConfigs    MonitorConfig[]
+  monitorResults    MonitorResult[]
+  reliabilityScores ReliabilityScoreRecord[]
+  alertRules        AlertRule[]
+  incidents         Incident[]
+  loadTests         LoadTest[]
+  savedRequests     SavedApiRequest[]
+  requestHistories  ApiRequestHistory[]
+  apiSchemas        ApiSchema[]
 
-  @@unique([projectId, name])
   @@index([projectId])
+  @@index([organizationId])
   @@map("apis")
 }
 
 model Environment {
-  id        String   @id @default(uuid())
-  name      String // e.g. "production", "staging", "development"
-  baseUrl   String?  @map("base_url") // e.g. "http://localhost:4000"
-  variables Json?    @default("{}") // Environment-level headers/auth tokens
-  apiId     String   @map("api_id")
-  api       Api      @relation(fields: [apiId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id             String          @id @default(uuid())
+  name           String // e.g. "production", "staging", "development"
+  baseUrl        String?         @map("base_url") // e.g. "http://localhost:4000"
+  type           EnvironmentType @default(DEVELOPMENT)
+  variables      Json?           @default("{}") // Environment-level headers/auth tokens
+  apiId          String          @map("api_id")
+  api            Api             @relation(fields: [apiId], references: [id], onDelete: Cascade)
+  organizationId String          @map("organization_id")
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
 
-  monitors         Monitor[]
-  alertRules       AlertRule[]
-  incidents        Incident[]
-  loadTests        LoadTest[]
-  savedRequests    SavedApiRequest[]
-  requestHistories ApiRequestHistory[]
+  monitors          Monitor[]
+  monitorConfigs    MonitorConfig[]
+  monitorResults    MonitorResult[]
+  reliabilityScores ReliabilityScoreRecord[]
+  alertRules        AlertRule[]
+  incidents         Incident[]
+  loadTests         LoadTest[]
+  savedRequests     SavedApiRequest[]
+  requestHistories  ApiRequestHistory[]
+  apiSchemas        ApiSchema[]
 
   @@unique([apiId, name])
   @@index([apiId])
+  @@index([organizationId])
   @@map("environments")
 }
 
@@ -208,8 +281,12 @@ model Monitor {
   // Assertions: e.g. [{ "type": "statusCode", "operator": "equals", "value": 200 }]
   assertions Json? @default("[]")
 
-  environmentId String      @map("environment_id")
-  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  apiId          String?      @map("api_id")
+  api            Api?         @relation(fields: [apiId], references: [id], onDelete: Cascade)
+  environmentId  String       @map("environment_id")
+  environment    Environment  @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -218,9 +295,181 @@ model Monitor {
   alerts     Alert[]
   alertRules AlertRule[]
 
+  @@index([apiId])
   @@index([environmentId])
+  @@index([organizationId])
   @@index([isActive])
   @@map("monitors")
+}
+
+model MonitorConfig {
+  id             String       @id @default(uuid())
+  name           String
+  description    String?
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  apiId          String       @map("api_id")
+  api            Api          @relation(fields: [apiId], references: [id], onDelete: Cascade)
+  environmentId  String       @map("environment_id")
+  environment    Environment  @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  // Request / endpoint configuration
+  method      HttpMethod @default(GET)
+  url         String // Endpoint path or full URL
+  headers     Json?      @default("{}")
+  body        String?
+  queryParams Json?      @default("{}") @map("query_params")
+
+  // Interval and timeout
+  interval Int     @default(60) // Frequency in seconds
+  timeout  Int     @default(10000) // Timeout in ms
+  enabled  Boolean @default(true)
+
+  // Expected status and optional response conditions
+  expectedStatus   Int   @default(200) @map("expected_status")
+  expectedResponse Json? @map("expected_response") // optional assertions/expected conditions
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  results    MonitorResult[]
+  apiSchemas ApiSchema[]
+  incidents  Incident[]
+
+  @@index([organizationId])
+  @@index([apiId])
+  @@index([environmentId])
+  @@index([enabled])
+  @@map("monitor_configs")
+}
+
+model MonitorResult {
+  id              String         @id @default(uuid())
+  monitorConfigId String?        @map("monitor_config_id")
+  monitorConfig   MonitorConfig? @relation(fields: [monitorConfigId], references: [id], onDelete: Cascade)
+
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  apiId          String       @map("api_id")
+  api            Api          @relation(fields: [apiId], references: [id], onDelete: Cascade)
+  environmentId  String       @map("environment_id")
+  environment    Environment  @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  timestamp    DateTime @default(now())
+  statusCode   Int?     @map("status_code")
+  latencyMs    Int      @map("latency_ms")
+  success      Boolean
+  timeout      Boolean  @default(false)
+  errorType    String?  @map("error_type")
+  responseSize Int?     @map("response_size")
+  schemaValid  Boolean? @map("schema_valid")
+
+  errorMessage    String? @map("error_message")
+  responseHeaders Json?   @map("response_headers")
+
+  @@index([organizationId])
+  @@index([apiId])
+  @@index([environmentId])
+  @@index([monitorConfigId, timestamp(sort: Desc)])
+  @@index([timestamp(sort: Desc)])
+  @@map("monitor_results")
+}
+
+model ReliabilityScoreRecord {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  apiId          String       @map("api_id")
+  api            Api          @relation(fields: [apiId], references: [id], onDelete: Cascade)
+  environmentId  String?      @map("environment_id")
+  environment    Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+
+  score                 Float // Overall score 0 - 100
+  availabilityScore     Float @map("availability_score")
+  latencyScore          Float @map("latency_score")
+  errorScore            Float @map("error_score")
+  latencyStabilityScore Float @map("latency_stability_score")
+  schemaScore           Float @map("schema_score")
+
+  sampleCount Int       @map("sample_count")
+  periodStart DateTime? @map("period_start")
+  periodEnd   DateTime? @map("period_end")
+
+  breakdown    Json // Detailed explanation & weights
+  calculatedAt DateTime @default(now()) @map("calculated_at")
+
+  @@index([organizationId])
+  @@index([apiId])
+  @@index([environmentId])
+  @@index([calculatedAt(sort: Desc)])
+  @@map("reliability_score_records")
+}
+
+model ApiSchema {
+  id                      String         @id @default(uuid())
+  organizationId          String         @map("organization_id")
+  organization            Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  apiId                   String         @map("api_id")
+  api                     Api            @relation(fields: [apiId], references: [id], onDelete: Cascade)
+  environmentId           String?        @map("environment_id")
+  environment             Environment?   @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  monitorConfigId         String?        @map("monitor_config_id")
+  monitorConfig           MonitorConfig? @relation(fields: [monitorConfigId], references: [id], onDelete: SetNull)
+
+  endpoint                String         // e.g. "/api/v1/users" or "GET /users"
+  method                  String         @default("GET")
+  activeBaselineVersionId String?        @map("active_baseline_version_id")
+  createdAt               DateTime       @default(now()) @map("created_at")
+  updatedAt               DateTime       @updatedAt @map("updated_at")
+
+  versions                SchemaVersion[]
+  changes                 SchemaChange[]
+
+  @@unique([organizationId, apiId, environmentId, endpoint, method])
+  @@index([organizationId, apiId])
+  @@index([environmentId])
+  @@map("api_schemas")
+}
+
+model SchemaVersion {
+  id               String       @id @default(uuid())
+  schemaId         String       @map("schema_id")
+  schema           ApiSchema    @relation(fields: [schemaId], references: [id], onDelete: Cascade)
+  versionNumber    Int          @map("version_number")
+  isBaseline       Boolean      @default(false) @map("is_baseline")
+  normalizedSchema Json         @map("normalized_schema")
+  samplePayload    Json?        @map("sample_payload")
+  checksum         String?      @map("checksum")
+  createdByUserId  String?      @map("created_by_user_id")
+  approvedAt       DateTime?    @map("approved_at")
+  createdAt        DateTime     @default(now()) @map("created_at")
+
+  changes          SchemaChange[]
+
+  @@unique([schemaId, versionNumber])
+  @@index([schemaId, isBaseline])
+  @@map("schema_versions")
+}
+
+model SchemaChange {
+  id             String               @id @default(uuid())
+  schemaId       String               @map("schema_id")
+  schema         ApiSchema            @relation(fields: [schemaId], references: [id], onDelete: Cascade)
+  versionId      String?              @map("version_id")
+  version        SchemaVersion?       @relation(fields: [versionId], references: [id], onDelete: SetNull)
+  fieldPath      String               @map("field_path")
+  changeType     SchemaChangeType     @map("change_type")
+  severity       SchemaChangeSeverity @map("severity")
+  previousType   String?              @map("previous_type")
+  currentType    String?              @map("current_type")
+  description    String               @map("description")
+  isBreaking     Boolean              @default(false) @map("is_breaking")
+  detectedAt     DateTime             @default(now()) @map("detected_at")
+  isAcknowledged Boolean              @default(false) @map("is_acknowledged")
+
+  @@index([schemaId, detectedAt(sort: Desc)])
+  @@index([schemaId, severity])
+  @@map("schema_changes")
 }
 
 model MonitorExecution {
@@ -257,17 +506,24 @@ model Alert {
 }
 
 model Incident {
-  id            String         @id @default(uuid())
-  projectId     String         @map("project_id")
-  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  title         String
-  description   String?
-  status        IncidentStatus @default(OPEN)
-  severity      AlertSeverity  @default(WARNING)
-  apiId         String?        @map("api_id")
-  api           Api?           @relation(fields: [apiId], references: [id], onDelete: SetNull)
-  environmentId String?        @map("environment_id")
-  environment   Environment?   @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  id             String         @id @default(uuid())
+  projectId      String?        @map("project_id")
+  project        Project?       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  organizationId String         @map("organization_id")
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title          String
+  description    String?
+  reason         String?        @map("reason")
+  durationMs     Int?           @map("duration_ms")
+  durationSeconds Int?          @map("duration_seconds")
+  status         IncidentStatus @default(OPEN)
+  severity       AlertSeverity  @default(WARNING)
+  apiId          String?        @map("api_id")
+  api            Api?           @relation(fields: [apiId], references: [id], onDelete: SetNull)
+  environmentId  String?        @map("environment_id")
+  environment    Environment?   @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  monitorConfigId String?       @map("monitor_config_id")
+  monitorConfig   MonitorConfig? @relation(fields: [monitorConfigId], references: [id], onDelete: SetNull)
 
   startedAt      DateTime  @default(now()) @map("started_at")
   acknowledgedAt DateTime? @map("acknowledged_at")
@@ -283,7 +539,9 @@ model Incident {
   deliveries NotificationDelivery[]
 
   @@index([projectId, status])
+  @@index([organizationId])
   @@index([apiId, environmentId, status])
+  @@index([monitorConfigId, status])
   @@index([status])
   @@index([startedAt(sort: Desc)])
   @@map("incidents")
@@ -319,19 +577,22 @@ model IncidentEvent {
 }
 
 model Dashboard {
-  id          String   @id @default(uuid())
-  name        String
-  description String?
-  projectId   String   @map("project_id")
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  layout      Json?    @default("[]") // Global layout metadata or widget order
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id             String       @id @default(uuid())
+  name           String
+  description    String?
+  projectId      String       @map("project_id")
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  layout         Json?        @default("[]") // Global layout metadata or widget order
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
 
   widgets DashboardWidget[]
 
   @@unique([projectId, name])
   @@index([projectId])
+  @@index([organizationId])
   @@map("dashboards")
 }
 
@@ -361,22 +622,29 @@ model AlertRule {
   id                 String         @id @default(uuid())
   name               String
   description        String?
-  projectId          String         @map("project_id")
-  project            Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  metric             String // e.g. "p95_latency", "error_rate", "availability"
+  projectId          String?        @map("project_id")
+  project            Project?       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  organizationId     String         @map("organization_id")
+  organization       Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  metric             String // e.g. "ERROR_RATE", "P95_LATENCY", "AVAILABILITY", "CONSECUTIVE_FAILURES", "API_DOWN", "RELIABILITY_SCORE", "SCHEMA_CHANGE"
   apiId              String?        @map("api_id")
   api                Api?           @relation(fields: [apiId], references: [id], onDelete: SetNull)
   environmentId      String?        @map("environment_id")
   environment        Environment?   @relation(fields: [environmentId], references: [id], onDelete: SetNull)
   monitorId          String?        @map("monitor_id")
   monitor            Monitor?       @relation(fields: [monitorId], references: [id], onDelete: SetNull)
-  condition          AlertCondition
+  condition          AlertCondition @default(GREATER_THAN)
+  operator           String?        @map("operator") // e.g. ">", ">=", "<", "<=", "==", "!="
   threshold          Float
-  duration           Int            @default(0) // FOR duration in seconds (0 = immediate)
+  duration           Int            @default(0) // Duration in seconds (0 = immediate)
   evaluationInterval Int            @default(60) @map("evaluation_interval") // in seconds
   severity           AlertSeverity  @default(WARNING)
   labels             Json?          @default("{}") // e.g. { team: "backend", service: "payments" }
   notificationConfig Json?          @default("{}") @map("notification_config")
+  notificationChannels Json?        @default("[]") @map("notification_channels")
+  grafanaRuleUid     String?        @map("grafana_rule_uid")
+  cooldownSeconds    Int            @default(300) @map("cooldown_seconds")
+  lastTriggeredAt    DateTime?      @map("last_triggered_at")
   enabled            Boolean        @default(true)
   createdBy          String?        @map("created_by")
   createdAt          DateTime       @default(now()) @map("created_at")
@@ -385,13 +653,36 @@ model AlertRule {
   instances   AlertInstance[]
   evaluations AlertEvaluation[]
   deliveries  NotificationDelivery[]
+  events      AlertEvent[]
 
   @@index([projectId, enabled])
+  @@index([organizationId])
   @@index([metric])
   @@index([apiId])
   @@index([environmentId])
   @@index([monitorId])
+  @@index([grafanaRuleUid])
   @@map("alert_rules")
+}
+
+model AlertEvent {
+  id             String        @id @default(uuid())
+  organizationId String        @map("organization_id")
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  alertRuleId    String        @map("alert_rule_id")
+  alertRule      AlertRule     @relation(fields: [alertRuleId], references: [id], onDelete: Cascade)
+  type           String        // "FIRING", "RESOLVED", "SUPPRESSED_COOLDOWN", "CREATED", "UPDATED", "DISABLED"
+  metricValue    Float?        @map("metric_value")
+  threshold      Float?        @map("threshold")
+  message        String
+  severity       AlertSeverity @default(WARNING)
+  fingerprint    String?       @map("fingerprint")
+  metadata       Json?         @default("{}")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([alertRuleId, createdAt(sort: Desc)])
+  @@map("alert_events")
 }
 
 model AlertInstance {
@@ -439,7 +730,7 @@ model AlertEvaluation {
 }
 
 // -------------------------------------------------------------
-// PHASE 6: NOTIFICATION & ALERT ROUTING MODELS
+// NOTIFICATION & ALERT ROUTING MODELS
 // -------------------------------------------------------------
 
 enum ContactPointType {
@@ -560,42 +851,45 @@ model NotificationSilence {
 // -------------------------------------------------------------
 
 model LoadTest {
-  id             String         @id @default(uuid())
+  id             String       @id @default(uuid())
   name           String
   description    String?
-  projectId      String         @map("project_id")
-  project        Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  apiId          String?        @map("api_id")
-  api            Api?           @relation(fields: [apiId], references: [id], onDelete: SetNull)
-  environmentId  String?        @map("environment_id")
-  environment    Environment?   @relation(fields: [environmentId], references: [id], onDelete: SetNull)
-  createdBy      String?        @map("created_by")
+  projectId      String       @map("project_id")
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  apiId          String?      @map("api_id")
+  api            Api?         @relation(fields: [apiId], references: [id], onDelete: SetNull)
+  environmentId  String?      @map("environment_id")
+  environment    Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  createdBy      String?      @map("created_by")
 
-  method         HttpMethod     @default(GET)
-  url            String         // path (e.g. "/delay/2") or full URL
-  headers        Json?          @default("{}")
-  queryParams    Json?          @default("{}")
-  body           String?        // Request payload for POST/PUT/PATCH
-  authentication Json?          @default("{}")
+  method         HttpMethod @default(GET)
+  url            String // path (e.g. "/delay/2") or full URL
+  headers        Json?      @default("{}")
+  queryParams    Json?      @default("{}")
+  body           String? // Request payload for POST/PUT/PATCH
+  authentication Json?      @default("{}")
 
-  virtualUsers   Int            @default(10) @map("virtual_users")
-  duration       Int?           @default(60) // in seconds, used if mode == DURATION
-  requestCount   Int?           @map("request_count") // total requests, used if mode == REQUEST_COUNT
-  mode           LoadTestMode   @default(DURATION)
-  timeout        Int            @default(5) // in seconds
+  virtualUsers Int          @default(10) @map("virtual_users")
+  duration     Int?         @default(60) // in seconds, used if mode == DURATION
+  requestCount Int?         @map("request_count") // total requests, used if mode == REQUEST_COUNT
+  mode         LoadTestMode @default(DURATION)
+  timeout      Int          @default(5) // in seconds
 
-  status         LoadTestStatus @default(QUEUED)
-  errorMessage   String?        @map("error_message")
+  status       LoadTestStatus @default(QUEUED)
+  errorMessage String?        @map("error_message")
 
-  startedAt      DateTime?      @map("started_at")
-  completedAt    DateTime?      @map("completed_at")
-  createdAt      DateTime       @default(now()) @map("created_at")
-  updatedAt      DateTime       @updatedAt @map("updated_at")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  result         LoadTestResult?
-  samples        LoadTestSample[]
+  result  LoadTestResult?
+  samples LoadTestSample[]
 
   @@index([projectId, status])
+  @@index([organizationId])
   @@index([apiId, environmentId])
   @@index([status])
   @@index([createdAt(sort: Desc)])
@@ -603,53 +897,53 @@ model LoadTest {
 }
 
 model LoadTestResult {
-  id                    String    @id @default(uuid())
-  loadTestId            String    @unique @map("load_test_id")
-  loadTest              LoadTest  @relation(fields: [loadTestId], references: [id], onDelete: Cascade)
+  id         String   @id @default(uuid())
+  loadTestId String   @unique @map("load_test_id")
+  loadTest   LoadTest @relation(fields: [loadTestId], references: [id], onDelete: Cascade)
 
-  totalRequests         Int       @map("total_requests")
-  successfulRequests    Int       @map("successful_requests")
-  failedRequests        Int       @map("failed_requests")
-  requestsPerSecond     Float     @map("requests_per_second")
-  actualDurationSeconds Float     @map("actual_duration_seconds")
+  totalRequests         Int   @map("total_requests")
+  successfulRequests    Int   @map("successful_requests")
+  failedRequests        Int   @map("failed_requests")
+  requestsPerSecond     Float @map("requests_per_second")
+  actualDurationSeconds Float @map("actual_duration_seconds")
 
-  avgLatency            Float     @map("avg_latency")
-  minLatency            Float     @map("min_latency")
-  maxLatency            Float     @map("max_latency")
-  p50Latency            Float     @map("p50_latency")
-  p90Latency            Float     @map("p90_latency")
-  p95Latency            Float     @map("p95_latency")
-  p99Latency            Float     @map("p99_latency")
+  avgLatency Float @map("avg_latency")
+  minLatency Float @map("min_latency")
+  maxLatency Float @map("max_latency")
+  p50Latency Float @map("p50_latency")
+  p90Latency Float @map("p90_latency")
+  p95Latency Float @map("p95_latency")
+  p99Latency Float @map("p99_latency")
 
-  errorRate             Float     @map("error_rate")
-  timeoutCount          Int       @default(0) @map("timeout_count")
-  connectionErrors      Int       @default(0) @map("connection_errors")
+  errorRate        Float @map("error_rate")
+  timeoutCount     Int   @default(0) @map("timeout_count")
+  connectionErrors Int   @default(0) @map("connection_errors")
 
-  statusCodeCounts      Json      @default("{}") @map("status_code_counts")
-  errorBreakdown        Json?     @default("{}") @map("error_breakdown")
+  statusCodeCounts Json  @default("{}") @map("status_code_counts")
+  errorBreakdown   Json? @default("{}") @map("error_breakdown")
 
-  createdAt             DateTime  @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
   @@map("load_test_results")
 }
 
 model LoadTestSample {
-  id                 String    @id @default(uuid())
-  loadTestId         String    @map("load_test_id")
-  loadTest           LoadTest  @relation(fields: [loadTestId], references: [id], onDelete: Cascade)
+  id         String   @id @default(uuid())
+  loadTestId String   @map("load_test_id")
+  loadTest   LoadTest @relation(fields: [loadTestId], references: [id], onDelete: Cascade)
 
   timestamp          DateTime
-  relativeSeconds    Int       @map("relative_seconds")
-  requestsPerSecond  Float     @map("requests_per_second")
-  activeUsers        Int       @default(0) @map("active_users")
-  avgLatency         Float     @map("avg_latency")
-  p50Latency         Float?    @map("p50_latency")
-  p95Latency         Float     @map("p95_latency")
-  p99Latency         Float?    @map("p99_latency")
-  errorRate          Float     @map("error_rate")
-  totalRequestsSoFar Int?      @map("total_requests_so_far")
-  successCount       Int?      @map("success_count")
-  failureCount       Int?      @map("failure_count")
+  relativeSeconds    Int      @map("relative_seconds")
+  requestsPerSecond  Float    @map("requests_per_second")
+  activeUsers        Int      @default(0) @map("active_users")
+  avgLatency         Float    @map("avg_latency")
+  p50Latency         Float?   @map("p50_latency")
+  p95Latency         Float    @map("p95_latency")
+  p99Latency         Float?   @map("p99_latency")
+  errorRate          Float    @map("error_rate")
+  totalRequestsSoFar Int?     @map("total_requests_so_far")
+  successCount       Int?     @map("success_count")
+  failureCount       Int?     @map("failure_count")
 
   @@index([loadTestId, relativeSeconds])
   @@map("load_test_samples")
@@ -660,73 +954,81 @@ model LoadTestSample {
 // -------------------------------------------------------------
 
 model ApiCollection {
-  id          String   @id @default(uuid())
-  projectId   String   @map("project_id")
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  name        String
-  description String?
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id             String       @id @default(uuid())
+  projectId      String       @map("project_id")
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
 
   requests SavedApiRequest[]
 
   @@index([projectId])
+  @@index([organizationId])
   @@map("api_collections")
 }
 
 model SavedApiRequest {
-  id            String         @id @default(uuid())
-  collectionId  String?        @map("collection_id")
-  collection    ApiCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
-  projectId     String         @map("project_id")
-  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  apiId         String?        @map("api_id")
-  api           Api?           @relation(fields: [apiId], references: [id], onDelete: SetNull)
-  environmentId String?        @map("environment_id")
-  environment   Environment?   @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  id             String         @id @default(uuid())
+  collectionId   String?        @map("collection_id")
+  collection     ApiCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  projectId      String         @map("project_id")
+  project        Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  organizationId String         @map("organization_id")
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  apiId          String?        @map("api_id")
+  api            Api?           @relation(fields: [apiId], references: [id], onDelete: SetNull)
+  environmentId  String?        @map("environment_id")
+  environment    Environment?   @relation(fields: [environmentId], references: [id], onDelete: SetNull)
 
-  name          String
-  description   String?
-  method        HttpMethod     @default(GET)
-  url           String
-  headers       Json           @default("{}")
-  queryParams   Json           @default("{}")
-  body          String?
-  bodyType      String         @default("json") @map("body_type")
-  auth          Json           @default("{}")
-  tests         Json           @default("[]")
-  timeout       Int            @default(10000)
+  name        String
+  description String?
+  method      HttpMethod @default(GET)
+  url         String
+  headers     Json       @default("{}")
+  queryParams Json       @default("{}")
+  body        String?
+  bodyType    String     @default("json") @map("body_type")
+  auth        Json       @default("{}")
+  tests       Json       @default("[]")
+  timeout     Int        @default(10000)
 
-  createdAt     DateTime       @default(now()) @map("created_at")
-  updatedAt     DateTime       @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([projectId])
+  @@index([organizationId])
   @@index([collectionId])
   @@map("saved_api_requests")
 }
 
 model ApiRequestHistory {
-  id             String       @id @default(uuid())
-  projectId      String?      @map("project_id")
-  project        Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  apiId          String?      @map("api_id")
-  api            Api?         @relation(fields: [apiId], references: [id], onDelete: SetNull)
-  environmentId  String?      @map("environment_id")
-  environment    Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  id             String        @id @default(uuid())
+  projectId      String?       @map("project_id")
+  project        Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  organizationId String?       @map("organization_id")
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  apiId          String?       @map("api_id")
+  api            Api?          @relation(fields: [apiId], references: [id], onDelete: SetNull)
+  environmentId  String?       @map("environment_id")
+  environment    Environment?  @relation(fields: [environmentId], references: [id], onDelete: SetNull)
 
   method         HttpMethod
   url            String
   status         Int?
-  statusText     String?      @map("status_text")
-  durationMs     Float?       @map("duration_ms")
-  sizeBytes      Int?         @map("size_bytes")
+  statusText     String?    @map("status_text")
+  durationMs     Float?     @map("duration_ms")
+  sizeBytes      Int?       @map("size_bytes")
   error          String?
-  requestSummary Json?        @map("request_summary")
+  requestSummary Json?      @map("request_summary")
 
-  createdAt      DateTime     @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
   @@index([projectId, createdAt(sort: Desc)])
+  @@index([organizationId])
   @@index([createdAt(sort: Desc)])
   @@map("api_request_histories")
 }
-

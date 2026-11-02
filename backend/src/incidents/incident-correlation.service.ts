@@ -185,6 +185,7 @@ export class IncidentCorrelationService {
       const newIncident = await tx.incident.create({
         data: {
           projectId,
+          organizationId: rule.organizationId,
           apiId: apiId ?? null,
           environmentId: environmentId ?? null,
           title,

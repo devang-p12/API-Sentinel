@@ -1,4 +1,13 @@
-import { IsNotEmpty, IsObject, IsOptional, IsString, IsUrl, IsUUID } from 'class-validator';
+import {
+  IsEnum,
+  IsNotEmpty,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUrl,
+  IsUUID,
+} from 'class-validator';
+import { EnvironmentType } from '@prisma/client';
 
 export class CreateEnvironmentDto {
   @IsString({ message: 'Environment name must be a string' })
@@ -9,9 +18,19 @@ export class CreateEnvironmentDto {
   @IsNotEmpty({ message: 'Base URL is required' })
   @IsUrl(
     { require_tld: false, require_protocol: true, protocols: ['http', 'https'] },
-    { message: 'baseUrl must be a valid HTTP or HTTPS URL (e.g. http://localhost:4000 or https://api.example.com)' },
+    {
+      message:
+        'baseUrl must be a valid HTTP or HTTPS URL (e.g. http://localhost:4000 or https://api.example.com)',
+    },
   )
   baseUrl: string;
+
+  @IsEnum(EnvironmentType, {
+    message:
+      'type must be one of: DEVELOPMENT, UAT, STAGING, PRODUCTION, CUSTOM',
+  })
+  @IsOptional()
+  type?: EnvironmentType;
 
   @IsObject({ message: 'Variables must be an object' })
   @IsOptional()

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as dns from 'dns/promises';
+import { RequestExecutionService } from '../../request-execution/request-execution.service';
 import {
   ApiRequestConfig,
   ApiExecutionResult,
@@ -8,32 +8,16 @@ import {
   TimingBreakdown,
 } from '../interfaces/api-request-config.interface';
 
-const BLOCKED_HOSTS = new Set([
-  '169.254.169.254',
-  '169.254.169.250',
-  'metadata.google.internal',
-  'metadata',
-]);
-
 @Injectable()
 export class ApiRequestExecutionService {
   private readonly logger = new Logger(ApiRequestExecutionService.name);
 
-  private readonly maxTimeoutMs = parseInt(
-    process.env.API_TEST_MAX_TIMEOUT_MS || '30000',
-    10,
-  );
-  private readonly maxResponseSizeBytes = parseInt(
-    process.env.API_TEST_MAX_RESPONSE_SIZE || '10485760', // 10MB default
-    10,
-  );
-  private readonly allowPrivateIps =
-    process.env.API_TESTER_ALLOW_PRIVATE_IPS === 'true' ||
-    process.env.NODE_ENV === 'test' ||
-    process.env.NODE_ENV === 'development';
+  constructor(
+    private readonly requestExecutionService: RequestExecutionService,
+  ) {}
 
   /**
-   * Main entry point to execute an API request safely.
+   * Main entry point to execute an API request safely using the shared RequestExecutionService.
    */
   async execute(config: ApiRequestConfig): Promise<ApiExecutionResult> {
     const startTime = performance.now();
@@ -85,400 +69,79 @@ export class ApiRequestExecutionService {
       }
     }
 
-    // 2. Validate URL and apply query params
-    let currentUrl: string;
-    try {
-      const urlObj = new URL(resolvedUrl);
-      for (const [k, v] of Object.entries(resolvedQueryParams)) {
-        urlObj.searchParams.set(k, v);
-      }
-      currentUrl = urlObj.toString();
-    } catch (err: any) {
+    // 2. Delegate HTTP execution to the shared RequestExecutionService
+    const httpRes = await this.requestExecutionService.execute({
+      method: config.method,
+      url: resolvedUrl,
+      queryParams: resolvedQueryParams,
+      headers: resolvedHeaders,
+      auth: resolvedAuth,
+      body: resolvedBody,
+      bodyType: config.bodyType,
+      timeoutMs: config.timeout,
+    });
+
+    // 3. Handle network, timeout, or malformed URL errors
+    if (!httpRes.success && (httpRes.isNetworkError || httpRes.isTimeout || httpRes.isMalformedUrl || httpRes.statusCode === null)) {
       return this.createErrorResult(
-        null,
-        `Invalid URL: ${err.message}`,
-        resolvedUrl,
-        performance.now() - startTime,
+        httpRes.statusCode,
+        httpRes.error || 'Execution failed',
+        httpRes.finalUrl || resolvedUrl,
+        httpRes.durationMs,
       );
     }
 
-    // 3. SSRF Check for initial URL
-    const ssrfCheck = await this.validateUrlSafety(currentUrl);
-    if (!ssrfCheck.safe) {
-      return this.createErrorResult(
-        400,
-        `Security Error (SSRF Protection): ${ssrfCheck.reason}`,
-        currentUrl,
-        performance.now() - startTime,
-      );
-    }
-
-    // 4. Apply Authentication to headers / queryParams
-    if (resolvedAuth) {
-      if (resolvedAuth.type === 'bearer' && resolvedAuth.token) {
-        resolvedHeaders['Authorization'] = `Bearer ${resolvedAuth.token}`;
-      } else if (
-        resolvedAuth.type === 'basic' &&
-        (resolvedAuth.username || resolvedAuth.password)
-      ) {
-        const credentials = `${resolvedAuth.username || ''}:${resolvedAuth.password || ''}`;
-        resolvedHeaders['Authorization'] = `Basic ${Buffer.from(credentials).toString('base64')}`;
-      } else if (resolvedAuth.type === 'apiKey' && resolvedAuth.apiKeyName && resolvedAuth.apiKeyValue) {
-        if (resolvedAuth.apiKeyPlacement === 'query') {
-          const urlObj = new URL(currentUrl);
-          urlObj.searchParams.set(resolvedAuth.apiKeyName, resolvedAuth.apiKeyValue);
-          currentUrl = urlObj.toString();
-        } else {
-          resolvedHeaders[resolvedAuth.apiKeyName] = resolvedAuth.apiKeyValue;
-        }
-      }
-    }
-
-    // 5. Ensure appropriate Content-Type header if body is provided
-    if (['POST', 'PUT', 'PATCH'].includes(config.method) && resolvedBody) {
-      if (!resolvedHeaders['Content-Type'] && !resolvedHeaders['content-type']) {
-        if (config.bodyType === 'json' || this.looksLikeJson(resolvedBody)) {
-          resolvedHeaders['Content-Type'] = 'application/json';
-        } else if (config.bodyType === 'x-www-form-urlencoded') {
-          resolvedHeaders['Content-Type'] = 'application/x-www-form-urlencoded';
-        } else {
-          resolvedHeaders['Content-Type'] = 'text/plain';
-        }
-      }
-    }
-
-    // Default User-Agent if not set
-    if (!resolvedHeaders['User-Agent'] && !resolvedHeaders['user-agent']) {
-      resolvedHeaders['User-Agent'] = 'API-Sentinel/1.0 (+https://github.com/api-sentinel)';
-    }
-
-    // 6. Timeout and Cancellation
-    const effectiveTimeout = Math.min(
-      Math.max(config.timeout || 10000, 500),
-      this.maxTimeoutMs,
+    // 4. Evaluate assertions / tests against the response
+    const testResults = this.evaluateAssertions(
+      config.tests || [],
+      httpRes.statusCode || 0,
+      httpRes.durationMs,
+      httpRes.rawBody,
+      httpRes.body,
     );
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-    }, effectiveTimeout);
 
-    // 7. Request execution with safe manual redirect handling (up to 5 hops)
-    const maxRedirects = 5;
-    let redirectCount = 0;
-    let finalUrl = currentUrl;
-    let lastResponse: Response | null = null;
-    let ttfbMs: number | undefined;
+    const passedCount = testResults.filter((r) => r.passed).length;
+    const failedCount = testResults.length - passedCount;
 
-    try {
-      while (redirectCount <= maxRedirects) {
-        const fetchOptions: RequestInit = {
-          method: redirectCount === 0 ? config.method : 'GET',
-          headers: resolvedHeaders,
-          signal: controller.signal,
-          redirect: 'manual',
-        };
+    // 5. Log execution without revealing sensitive credentials
+    this.logSanitizedExecution({
+      method: config.method,
+      url: httpRes.finalUrl,
+      status: httpRes.statusCode,
+      durationMs: httpRes.durationMs,
+      sizeBytes: httpRes.sizeBytes,
+      projectId: config.projectId,
+    });
 
-        if (
-          redirectCount === 0 &&
-          ['POST', 'PUT', 'PATCH'].includes(config.method) &&
-          resolvedBody
-        ) {
-          fetchOptions.body = resolvedBody;
-        }
-
-        const ttfbStart = performance.now();
-        const response = await fetch(finalUrl, fetchOptions);
-        if (!ttfbMs) {
-          ttfbMs = Math.round(performance.now() - ttfbStart);
-        }
-
-        // Check if redirect
-        if ([301, 302, 303, 307, 308].includes(response.status)) {
-          const location = response.headers.get('location');
-          if (!location) {
-            lastResponse = response;
-            break;
-          }
-
-          redirectCount++;
-          if (redirectCount > maxRedirects) {
-            clearTimeout(timeoutId);
-            return this.createErrorResult(
-              508,
-              `Exceeded maximum redirect limit (${maxRedirects} hops)`,
-              finalUrl,
-              performance.now() - startTime,
-            );
-          }
-
-          // Resolve relative redirect against current URL
-          const nextUrl = new URL(location, finalUrl).toString();
-
-          // SSRF validate destination URL
-          const redirectSsrf = await this.validateUrlSafety(nextUrl);
-          if (!redirectSsrf.safe) {
-            clearTimeout(timeoutId);
-            return this.createErrorResult(
-              400,
-              `Security Error on redirect: ${redirectSsrf.reason}`,
-              nextUrl,
-              performance.now() - startTime,
-            );
-          }
-
-          finalUrl = nextUrl;
-          continue;
-        }
-
-        lastResponse = response;
-        break;
-      }
-
-      clearTimeout(timeoutId);
-
-      if (!lastResponse) {
-        return this.createErrorResult(
-          null,
-          'No response received from target host',
-          finalUrl,
-          performance.now() - startTime,
-        );
-      }
-
-      // Check Content-Length before downloading if present
-      const reportedLength = lastResponse.headers.get('content-length');
-      if (reportedLength) {
-        const parsedLen = parseInt(reportedLength, 10);
-        if (!isNaN(parsedLen) && parsedLen > this.maxResponseSizeBytes) {
-          return this.createErrorResult(
-            413,
-            `Response Content-Length (${(parsedLen / 1024 / 1024).toFixed(1)} MB) exceeds maximum allowed size of ${(this.maxResponseSizeBytes / 1024 / 1024).toFixed(0)} MB.`,
-            finalUrl,
-            performance.now() - startTime,
-          );
-        }
-      }
-
-      // Read response body with size limit enforcement
-      const rawText = await lastResponse.text();
-      const bodyBytes = Buffer.byteLength(rawText, 'utf8');
-
-      if (bodyBytes > this.maxResponseSizeBytes) {
-        return this.createErrorResult(
-          413,
-          `Response payload (${(bodyBytes / 1024 / 1024).toFixed(1)} MB) exceeds maximum allowed size of ${(this.maxResponseSizeBytes / 1024 / 1024).toFixed(0)} MB.`,
-          finalUrl,
-          performance.now() - startTime,
-        );
-      }
-
-      const totalDurationMs = Math.round(performance.now() - startTime);
-
-      // Extract headers
-      const responseHeaders: Record<string, string> = {};
-      const setCookies: string[] = [];
-      lastResponse.headers.forEach((value, key) => {
-        responseHeaders[key.toLowerCase()] = value;
-        if (key.toLowerCase() === 'set-cookie') {
-          setCookies.push(value);
-        }
-      });
-
-      // Parse cookies
-      const cookies = this.parseCookies(setCookies);
-
-      // Parse body if JSON
-      const contentType = responseHeaders['content-type'] || 'text/plain';
-      let parsedBody: any = rawText;
-      if (contentType.includes('json') || this.looksLikeJson(rawText)) {
-        try {
-          parsedBody = JSON.parse(rawText);
-        } catch {
-          parsedBody = rawText;
-        }
-      }
-
-      // Evaluate tests / assertions
-      const testResults = this.evaluateAssertions(
-        config.tests || [],
-        lastResponse.status,
-        totalDurationMs,
-        rawText,
-        parsedBody,
-      );
-
-      const passedCount = testResults.filter((r) => r.passed).length;
-      const failedCount = testResults.length - passedCount;
-
-      const timing: TimingBreakdown = {
-        totalMs: totalDurationMs,
-        ttfbMs: ttfbMs || Math.min(totalDurationMs, 50),
-        downloadMs: Math.max(0, totalDurationMs - (ttfbMs || 0)),
-      };
-
-      // Log execution without sensitive credentials
-      this.logSanitizedExecution({
-        method: config.method,
-        url: finalUrl,
-        status: lastResponse.status,
-        durationMs: totalDurationMs,
-        sizeBytes: bodyBytes,
-        projectId: config.projectId,
-      });
-
-      return {
-        status: lastResponse.status,
-        statusText: lastResponse.statusText || this.getDefaultStatusText(lastResponse.status),
-        headers: responseHeaders,
-        cookies,
-        body: parsedBody,
-        rawBody: rawText,
-        contentType,
-        size: bodyBytes,
-        durationMs: totalDurationMs,
-        timing,
-        testResults,
-        testsSummary: {
-          total: testResults.length,
-          passed: passedCount,
-          failed: failedCount,
-        },
-        finalUrl,
-      };
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      const durationMs = Math.round(performance.now() - startTime);
-
-      if (err.name === 'AbortError' || controller.signal.aborted) {
-        return this.createErrorResult(
-          504,
-          `Gateway Timeout: Request exceeded the configured timeout of ${(effectiveTimeout / 1000).toFixed(1)} seconds.`,
-          finalUrl,
-          durationMs,
-        );
-      }
-
-      let errorMsg = err.message || 'Unknown network error';
-      if (err.code === 'ENOTFOUND') {
-        errorMsg = `DNS resolution failed: Host could not be found (${finalUrl})`;
-      } else if (err.code === 'ECONNREFUSED') {
-        errorMsg = `Connection refused: Target host actively rejected the connection`;
-      } else if (err.code === 'ECONNRESET') {
-        errorMsg = `Connection reset by peer`;
-      } else if (err.code === 'CERT_HAS_EXPIRED' || err.message?.includes('certificate')) {
-        errorMsg = `TLS/SSL Certificate Error: ${err.message}`;
-      }
-
-      return this.createErrorResult(null, errorMsg, finalUrl, durationMs);
-    }
+    return {
+      status: httpRes.statusCode,
+      statusText: httpRes.statusText || this.getDefaultStatusText(httpRes.statusCode || 200),
+      headers: httpRes.headers,
+      cookies: httpRes.cookies,
+      body: httpRes.body,
+      rawBody: httpRes.rawBody,
+      contentType: httpRes.contentType || 'text/plain',
+      size: httpRes.sizeBytes,
+      durationMs: httpRes.durationMs,
+      timing: {
+        totalMs: httpRes.timing.totalMs,
+        ttfbMs: httpRes.timing.ttfbMs,
+        downloadMs: httpRes.timing.downloadMs,
+      },
+      testResults,
+      testsSummary: {
+        total: testResults.length,
+        passed: passedCount,
+        failed: failedCount,
+      },
+      finalUrl: httpRes.finalUrl,
+      error: httpRes.error,
+    };
   }
+
 
   /**
    * SSRF Protection Validator.
-   * Blocks local loopback, cloud metadata endpoints, and private IPv4/IPv6 networks.
-   */
-  async validateUrlSafety(rawUrl: string): Promise<{ safe: boolean; reason?: string }> {
-    let parsed: URL;
-    try {
-      parsed = new URL(rawUrl);
-    } catch {
-      return { safe: false, reason: 'Malformed URL' };
-    }
-
-    // Only allow http and https
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return {
-        safe: false,
-        reason: `Unsupported URL protocol "${parsed.protocol}". Only HTTP and HTTPS are permitted.`,
-      };
-    }
-
-    const hostname = parsed.hostname.toLowerCase();
-
-    // Check blocked known cloud metadata / internal hostnames
-    if (BLOCKED_HOSTS.has(hostname) || hostname.endsWith('.metadata.google.internal')) {
-      return {
-        safe: false,
-        reason: `Access to cloud metadata endpoints (${hostname}) is strictly prohibited.`,
-      };
-    }
-
-    // If private IPs are allowed in this environment (e.g. dev testing), skip subnet blocks
-    if (this.allowPrivateIps) {
-      return { safe: true };
-    }
-
-    // Check direct loopback strings
-    if (
-      hostname === 'localhost' ||
-      hostname.endsWith('.localhost') ||
-      hostname === '0.0.0.0' ||
-      hostname === '127.0.0.1' ||
-      hostname === '::1' ||
-      hostname === '[::1]'
-    ) {
-      return {
-        safe: false,
-        reason: `Access to local loopback addresses (${hostname}) is prohibited.`,
-      };
-    }
-
-    // Check IP address format or resolve DNS to check target IPs
-    try {
-      const records = await dns.lookup(hostname, { all: true });
-      for (const rec of records) {
-        if (this.isPrivateOrRestrictedIp(rec.address)) {
-          return {
-            safe: false,
-            reason: `Resolved IP address ${rec.address} belongs to a private, loopback, or reserved network range.`,
-          };
-        }
-      }
-    } catch {
-      // If DNS resolution fails, allow fetch to handle the ENOTFOUND error naturally
-    }
-
-    return { safe: true };
-  }
-
-  /**
-   * Checks if an IPv4 or IPv6 address belongs to private or restricted network ranges.
-   */
-  private isPrivateOrRestrictedIp(ip: string): boolean {
-    // IPv6 loopback / unique local
-    if (
-      ip === '::1' ||
-      ip === '::' ||
-      ip.startsWith('fe80:') ||
-      ip.startsWith('fc00:') ||
-      ip.startsWith('fd00:')
-    ) {
-      return true;
-    }
-
-    // IPv4 check
-    const parts = ip.split('.').map((p) => parseInt(p, 10));
-    if (parts.length === 4 && parts.every((p) => !isNaN(p) && p >= 0 && p <= 255)) {
-      const [a, b] = parts;
-      // 127.0.0.0/8 (Loopback)
-      if (a === 127) return true;
-      // 0.0.0.0/8
-      if (a === 0) return true;
-      // 10.0.0.0/8 (Private)
-      if (a === 10) return true;
-      // 172.16.0.0/12 (Private)
-      if (a === 172 && b >= 16 && b <= 31) return true;
-      // 192.168.0.0/16 (Private)
-      if (a === 192 && b === 168) return true;
-      // 169.254.0.0/16 (Link Local / Metadata)
-      if (a === 169 && b === 254) return true;
-      // 100.64.0.0/10 (Carrier-grade NAT)
-      if (a === 100 && b >= 64 && b <= 127) return true;
-    }
-
-    return false;
-  }
-
   /**
    * Evaluates post-execution assertions / tests.
    */
