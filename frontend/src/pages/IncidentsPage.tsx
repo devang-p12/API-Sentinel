@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/table';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
+  Alert02Icon,
   AlertCircleIcon,
   CheckmarkCircle02Icon,
   Clock01Icon,
@@ -133,41 +134,87 @@ export function IncidentsPage() {
     switch (status) {
       case 'OPEN':
         return (
-          <Badge className="bg-destructive/20 text-destructive border-destructive/30 font-mono text-[11px] gap-1">
-            <span className="size-1.5 rounded-full bg-destructive animate-ping" />
-            🔴 OPEN
+          <Badge
+            variant="outline"
+            className="bg-rose-500/10 text-rose-500 border-rose-500/30 font-mono text-[11px] font-semibold gap-1.5 px-2 py-0.5"
+          >
+            <span className="size-1.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
+            OPEN
           </Badge>
         );
       case 'ACKNOWLEDGED':
         return (
-          <Badge className="bg-amber-500/20 text-amber-500 border-amber-500/30 font-mono text-[11px] gap-1">
-            <span className="size-1.5 rounded-full bg-amber-500" />
-            🟡 ACK
+          <Badge
+            variant="outline"
+            className="bg-amber-500/10 text-amber-500 border-amber-500/30 font-mono text-[11px] font-semibold gap-1.5 px-2 py-0.5"
+          >
+            <span className="size-1.5 rounded-full bg-amber-500 shrink-0" />
+            ACKNOWLEDGED
           </Badge>
         );
       case 'RESOLVED':
         return (
-          <Badge className="bg-emerald-500/20 text-emerald-500 border-emerald-500/30 font-mono text-[11px] gap-1">
-            ✓ RESOLVED
+          <Badge
+            variant="outline"
+            className="bg-emerald-500/10 text-emerald-500 border-emerald-500/30 font-mono text-[11px] font-semibold gap-1.5 px-2 py-0.5"
+          >
+            <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-3 text-emerald-500 shrink-0" />
+            RESOLVED
           </Badge>
         );
       default:
-        return <Badge variant="outline">{status}</Badge>;
+        return (
+          <Badge variant="outline" className="font-mono text-[11px]">
+            {status}
+          </Badge>
+        );
     }
   };
 
   const getSeverityBadge = (severity: string) => {
     switch (severity) {
       case 'CRITICAL':
-        return <Badge className="bg-red-500 text-white font-mono text-[10px]">CRITICAL</Badge>;
+        return (
+          <Badge
+            variant="outline"
+            className="bg-rose-500/15 text-rose-400 border-rose-500/30 font-mono text-[10px] font-bold px-2 py-0.5"
+          >
+            CRITICAL
+          </Badge>
+        );
       case 'HIGH':
-        return <Badge className="bg-orange-500 text-white font-mono text-[10px]">HIGH</Badge>;
+        return (
+          <Badge
+            variant="outline"
+            className="bg-orange-500/15 text-orange-400 border-orange-500/30 font-mono text-[10px] font-bold px-2 py-0.5"
+          >
+            HIGH
+          </Badge>
+        );
       case 'WARNING':
-        return <Badge className="bg-amber-500 text-black font-mono text-[10px]">WARNING</Badge>;
+        return (
+          <Badge
+            variant="outline"
+            className="bg-amber-500/15 text-amber-400 border-amber-500/30 font-mono text-[10px] font-bold px-2 py-0.5"
+          >
+            WARNING
+          </Badge>
+        );
       case 'INFO':
-        return <Badge className="bg-blue-500 text-white font-mono text-[10px]">INFO</Badge>;
+        return (
+          <Badge
+            variant="outline"
+            className="bg-blue-500/15 text-blue-400 border-blue-500/30 font-mono text-[10px] font-bold px-2 py-0.5"
+          >
+            INFO
+          </Badge>
+        );
       default:
-        return <Badge variant="outline">{severity}</Badge>;
+        return (
+          <Badge variant="outline" className="font-mono text-[10px]">
+            {severity}
+          </Badge>
+        );
     }
   };
 
@@ -183,60 +230,60 @@ export function IncidentsPage() {
             size="sm"
             onClick={loadData}
             disabled={isLoading}
-            className="h-8 gap-1.5 text-xs border-border"
+            className="h-8 gap-1.5 text-xs font-mono border-border"
           >
-            <HugeiconsIcon icon={ArrowReloadHorizontalIcon} className="size-3.5" />
+            <HugeiconsIcon icon={ArrowReloadHorizontalIcon} className={`size-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
           </Button>
         </div>
       }
     >
       <div className="space-y-6">
-        {/* Section 25: Summary KPI Cards Bar */}
+        {/* KPI Summary Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <Card
             onClick={() => setStatusFilter(statusFilter === 'OPEN' ? 'ALL' : 'OPEN')}
-            className={`cursor-pointer transition-all border ${
+            className={`cursor-pointer transition-colors rounded-none border ${
               statusFilter === 'OPEN'
-                ? 'border-destructive bg-destructive/10'
-                : 'hover:border-destructive/40 bg-card/60'
+                ? 'border-rose-500/60 bg-rose-500/10'
+                : 'border-border bg-card hover:bg-muted/10'
             }`}
           >
-            <CardContent className="p-4 flex items-center justify-between">
+            <CardContent className="p-3.5 flex items-center justify-between">
               <div className="space-y-1">
-                <span className="text-xs text-muted-foreground flex items-center gap-1.5">
-                  <span className="size-2 rounded-full bg-destructive animate-pulse" />
-                  Open Outages
+                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <span className="size-1.5 rounded-full bg-rose-500 animate-pulse" />
+                  Active Outages
                 </span>
-                <div className="text-2xl font-bold font-mono text-destructive">
+                <div className="text-xl font-bold font-mono text-rose-500">
                   {summary.open}
                 </div>
               </div>
-              <div className="size-8 rounded-full bg-destructive/10 text-destructive flex items-center justify-center">
-                <HugeiconsIcon icon={AlertCircleIcon} className="size-4" />
+              <div className="size-8 rounded bg-rose-500/10 text-rose-500 flex items-center justify-center border border-rose-500/20">
+                <HugeiconsIcon icon={Alert02Icon} className="size-4" />
               </div>
             </CardContent>
           </Card>
 
           <Card
             onClick={() => setStatusFilter(statusFilter === 'ACKNOWLEDGED' ? 'ALL' : 'ACKNOWLEDGED')}
-            className={`cursor-pointer transition-all border ${
+            className={`cursor-pointer transition-colors rounded-none border ${
               statusFilter === 'ACKNOWLEDGED'
-                ? 'border-amber-500 bg-amber-500/10'
-                : 'hover:border-amber-500/40 bg-card/60'
+                ? 'border-amber-500/60 bg-amber-500/10'
+                : 'border-border bg-card hover:bg-muted/10'
             }`}
           >
-            <CardContent className="p-4 flex items-center justify-between">
+            <CardContent className="p-3.5 flex items-center justify-between">
               <div className="space-y-1">
-                <span className="text-xs text-muted-foreground flex items-center gap-1.5">
-                  <span className="size-2 rounded-full bg-amber-500" />
+                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <span className="size-1.5 rounded-full bg-amber-500" />
                   Acknowledged
                 </span>
-                <div className="text-2xl font-bold font-mono text-amber-500">
+                <div className="text-xl font-bold font-mono text-amber-500">
                   {summary.acknowledged}
                 </div>
               </div>
-              <div className="size-8 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center">
+              <div className="size-8 rounded bg-amber-500/10 text-amber-500 flex items-center justify-center border border-amber-500/20">
                 <HugeiconsIcon icon={Clock01Icon} className="size-4" />
               </div>
             </CardContent>
@@ -244,23 +291,23 @@ export function IncidentsPage() {
 
           <Card
             onClick={() => setStatusFilter(statusFilter === 'RESOLVED' ? 'ALL' : 'RESOLVED')}
-            className={`cursor-pointer transition-all border ${
+            className={`cursor-pointer transition-colors rounded-none border ${
               statusFilter === 'RESOLVED'
-                ? 'border-emerald-500 bg-emerald-500/10'
-                : 'hover:border-emerald-500/40 bg-card/60'
+                ? 'border-emerald-500/60 bg-emerald-500/10'
+                : 'border-border bg-card hover:bg-muted/10'
             }`}
           >
-            <CardContent className="p-4 flex items-center justify-between">
+            <CardContent className="p-3.5 flex items-center justify-between">
               <div className="space-y-1">
-                <span className="text-xs text-muted-foreground flex items-center gap-1.5">
-                  <span className="size-2 rounded-full bg-emerald-500" />
+                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <span className="size-1.5 rounded-full bg-emerald-500" />
                   Resolved
                 </span>
-                <div className="text-2xl font-bold font-mono text-emerald-500">
+                <div className="text-xl font-bold font-mono text-emerald-500">
                   {summary.resolved}
                 </div>
               </div>
-              <div className="size-8 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+              <div className="size-8 rounded bg-emerald-500/10 text-emerald-500 flex items-center justify-center border border-emerald-500/20">
                 <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-4" />
               </div>
             </CardContent>
@@ -271,39 +318,41 @@ export function IncidentsPage() {
               setStatusFilter('ALL');
               setSeverityFilter('ALL');
             }}
-            className={`cursor-pointer transition-all border ${
+            className={`cursor-pointer transition-colors rounded-none border ${
               statusFilter === 'ALL' && severityFilter === 'ALL'
-                ? 'border-primary bg-primary/10'
-                : 'hover:border-primary/40 bg-card/60'
+                ? 'border-primary/60 bg-primary/10'
+                : 'border-border bg-card hover:bg-muted/10'
             }`}
           >
-            <CardContent className="p-4 flex items-center justify-between">
+            <CardContent className="p-3.5 flex items-center justify-between">
               <div className="space-y-1">
-                <span className="text-xs text-muted-foreground">Total Incidents</span>
-                <div className="text-2xl font-bold font-mono text-foreground">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                  Total Recorded
+                </span>
+                <div className="text-xl font-bold font-mono text-foreground">
                   {summary.total}
                 </div>
               </div>
-              <div className="size-8 rounded-full bg-primary/10 text-primary flex items-center justify-center">
-                <span className="font-mono text-xs font-bold">ALL</span>
+              <div className="size-8 rounded bg-muted text-muted-foreground flex items-center justify-center border border-border">
+                <HugeiconsIcon icon={AlertCircleIcon} className="size-4" />
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Section 26: Search & Filter Controls */}
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-muted/20 p-3 rounded border border-border">
-          <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+        {/* Search & Filter Controls */}
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-card p-3 rounded-none border border-border">
+          <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[240px]">
             <div className="relative flex-1 max-w-sm">
               <HugeiconsIcon
                 icon={Search01Icon}
-                className="absolute left-2.5 top-2.5 size-4 text-muted-foreground"
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground"
               />
               <Input
                 placeholder="Search incident title, description, or API..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 h-9 text-xs bg-card"
+                className="pl-8 h-8 text-xs font-mono bg-background"
               />
             </div>
 
@@ -311,19 +360,19 @@ export function IncidentsPage() {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="h-9 px-3 text-xs bg-card border border-border rounded text-foreground focus:outline-none"
+              className="h-8 px-2.5 text-xs bg-background border border-input rounded-none text-foreground font-mono focus:outline-none focus:border-ring"
             >
               <option value="ALL">All Statuses</option>
-              <option value="OPEN">🔴 Open</option>
-              <option value="ACKNOWLEDGED">🟡 Acknowledged</option>
-              <option value="RESOLVED">✓ Resolved</option>
+              <option value="OPEN">Open</option>
+              <option value="ACKNOWLEDGED">Acknowledged</option>
+              <option value="RESOLVED">Resolved</option>
             </select>
 
             {/* Severity Filter */}
             <select
               value={severityFilter}
               onChange={(e) => setSeverityFilter(e.target.value)}
-              className="h-9 px-3 text-xs bg-card border border-border rounded text-foreground focus:outline-none"
+              className="h-8 px-2.5 text-xs bg-background border border-input rounded-none text-foreground font-mono focus:outline-none focus:border-ring"
             >
               <option value="ALL">All Severities</option>
               <option value="CRITICAL">Critical</option>
@@ -342,7 +391,7 @@ export function IncidentsPage() {
                 setSeverityFilter('ALL');
                 setSearchQuery('');
               }}
-              className="h-8 text-xs text-muted-foreground hover:text-foreground"
+              className="h-8 text-xs font-mono text-muted-foreground hover:text-foreground"
             >
               Reset Filters
             </Button>
@@ -350,39 +399,39 @@ export function IncidentsPage() {
         </div>
 
         {/* Incidents Table */}
-        <Card className="border border-border bg-card">
+        <Card className="rounded-none border border-border bg-card">
           <CardContent className="p-0">
             <Table>
               <TableHeader>
                 <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="w-[120px] text-xs">Incident ID</TableHead>
-                  <TableHead className="text-xs">Title & Scope</TableHead>
-                  <TableHead className="w-[100px] text-xs">Severity</TableHead>
-                  <TableHead className="w-[120px] text-xs">Status</TableHead>
-                  <TableHead className="w-[110px] text-xs">Duration</TableHead>
-                  <TableHead className="w-[100px] text-xs text-center">Alerts</TableHead>
-                  <TableHead className="w-[140px] text-xs text-right">Actions</TableHead>
+                  <TableHead className="w-[130px] text-xs font-mono">Incident ID</TableHead>
+                  <TableHead className="text-xs font-mono">Title & Scope</TableHead>
+                  <TableHead className="w-[110px] text-xs font-mono">Severity</TableHead>
+                  <TableHead className="w-[130px] text-xs font-mono">Status</TableHead>
+                  <TableHead className="w-[110px] text-xs font-mono">Duration</TableHead>
+                  <TableHead className="w-[90px] text-xs font-mono text-center">Alerts</TableHead>
+                  <TableHead className="w-[140px] text-xs font-mono text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading && incidents.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-32 text-center text-xs text-muted-foreground">
+                    <TableCell colSpan={7} className="h-32 text-center text-xs font-mono text-muted-foreground">
                       Loading incidents...
                     </TableCell>
                   </TableRow>
                 ) : incidents.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-40 text-center text-xs text-muted-foreground">
+                    <TableCell colSpan={7} className="h-40 text-center text-xs font-mono text-muted-foreground">
                       <div className="flex flex-col items-center justify-center space-y-2">
-                        <div className="size-10 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+                        <div className="size-10 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center border border-emerald-500/20">
                           <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-5" />
                         </div>
-                        <span className="font-semibold text-foreground">No Incidents Found</span>
+                        <span className="font-semibold text-foreground text-sm">All Services Operating Normally</span>
                         <span className="text-[11px] text-muted-foreground max-w-sm">
                           {statusFilter === 'OPEN'
-                            ? 'All monitored APIs are running smoothly without active outages.'
-                            : 'No incident matches the current filters.'}
+                            ? 'No active outages or alert violations recorded.'
+                            : 'No incidents match your current filter parameters.'}
                         </span>
                       </div>
                     </TableCell>
@@ -392,9 +441,9 @@ export function IncidentsPage() {
                     <TableRow
                       key={inc.id}
                       onClick={() => handleOpenIncident(inc.id)}
-                      className="border-border hover:bg-muted/30 cursor-pointer transition-colors"
+                      className="border-border hover:bg-muted/20 cursor-pointer transition-colors"
                     >
-                      <TableCell className="font-mono text-xs font-semibold text-foreground">
+                      <TableCell className="font-mono text-xs font-bold text-foreground">
                         INC-{inc.id.slice(0, 8)}
                       </TableCell>
                       <TableCell>
@@ -403,9 +452,9 @@ export function IncidentsPage() {
                             {inc.title}
                           </div>
                           <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-mono">
-                            <span>{inc.api?.name || 'All APIs'}</span>
+                            <span className="text-foreground">{inc.api?.name || 'All APIs'}</span>
                             <span>•</span>
-                            <span>{inc.environment?.name || 'All Environments'}</span>
+                            <span>{inc.environment?.name || 'Production'}</span>
                             <span>•</span>
                             <span>{new Date(inc.startedAt).toLocaleTimeString()}</span>
                           </div>
@@ -413,11 +462,11 @@ export function IncidentsPage() {
                       </TableCell>
                       <TableCell>{getSeverityBadge(inc.severity)}</TableCell>
                       <TableCell>{getStatusBadge(inc.status)}</TableCell>
-                      <TableCell className="font-mono text-xs font-medium text-foreground">
+                      <TableCell className="font-mono text-xs text-foreground">
                         {formatDuration(inc.durationSeconds)}
                       </TableCell>
                       <TableCell className="text-center">
-                        <Badge variant="outline" className="text-xs font-mono">
+                        <Badge variant="outline" className="text-[11px] font-mono border-border">
                           {inc._count?.alerts ?? inc.alerts?.length ?? 1}
                         </Badge>
                       </TableCell>
@@ -428,7 +477,7 @@ export function IncidentsPage() {
                               variant="outline"
                               size="xs"
                               onClick={(e) => handleAcknowledgeQuick(e, inc.id)}
-                              className="h-6 text-[11px] border-amber-500/30 text-amber-500 hover:bg-amber-500/10 px-2"
+                              className="h-6 text-[10px] font-mono border-amber-500/30 text-amber-500 hover:bg-amber-500/10 px-2"
                               title="Acknowledge Incident"
                             >
                               Ack
@@ -439,7 +488,7 @@ export function IncidentsPage() {
                               variant="outline"
                               size="xs"
                               onClick={(e) => handleResolveQuick(e, inc.id)}
-                              className="h-6 text-[11px] border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10 px-2"
+                              className="h-6 text-[10px] font-mono border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10 px-2"
                               title="Resolve Incident"
                             >
                               Resolve
@@ -482,3 +531,5 @@ export function IncidentsPage() {
     </PageContainer>
   );
 }
+
+export default IncidentsPage;

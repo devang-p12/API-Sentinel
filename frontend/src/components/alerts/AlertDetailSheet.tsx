@@ -87,21 +87,30 @@ export function AlertDetailSheet({
     switch (status) {
       case 'FIRING':
         return (
-          <Badge className="bg-destructive/20 text-destructive border-destructive/30 font-mono text-xs gap-1">
-            <span className="size-2 rounded-full bg-destructive animate-ping" />
-            🔥 FIRING
+          <Badge
+            variant="outline"
+            className="bg-rose-500/10 text-rose-500 border-rose-500/30 font-mono text-xs gap-1.5 font-bold"
+          >
+            <span className="size-1.5 rounded-full bg-rose-500 animate-pulse" />
+            FIRING
           </Badge>
         );
       case 'PENDING':
         return (
-          <Badge className="bg-amber-500/20 text-amber-500 border-amber-500/30 font-mono text-xs gap-1">
-            <span className="size-2 rounded-full bg-amber-500 animate-pulse" />
-            ⏳ PENDING
+          <Badge
+            variant="outline"
+            className="bg-amber-500/10 text-amber-500 border-amber-500/30 font-mono text-xs gap-1.5 font-semibold"
+          >
+            <span className="size-1.5 rounded-full bg-amber-500" />
+            PENDING
           </Badge>
         );
       case 'RESOLVED':
         return (
-          <Badge className="bg-emerald-500/20 text-emerald-500 border-emerald-500/30 font-mono text-xs gap-1">
+          <Badge
+            variant="outline"
+            className="bg-emerald-500/10 text-emerald-500 border-emerald-500/30 font-mono text-xs gap-1.5 font-semibold"
+          >
             ✓ RESOLVED
           </Badge>
         );
@@ -117,13 +126,29 @@ export function AlertDetailSheet({
   const getSeverityBadge = (sev: string) => {
     switch (sev) {
       case 'CRITICAL':
-        return <Badge className="bg-destructive text-destructive-foreground font-mono text-[10px]">CRITICAL</Badge>;
+        return (
+          <Badge variant="outline" className="bg-rose-500/15 text-rose-400 border-rose-500/30 font-mono text-[10px] font-bold px-1.5 py-0.5">
+            CRITICAL
+          </Badge>
+        );
       case 'HIGH':
-        return <Badge className="bg-orange-500 text-white font-mono text-[10px]">HIGH</Badge>;
+        return (
+          <Badge variant="outline" className="bg-orange-500/15 text-orange-400 border-orange-500/30 font-mono text-[10px] font-bold px-1.5 py-0.5">
+            HIGH
+          </Badge>
+        );
       case 'WARNING':
-        return <Badge className="bg-amber-500 text-black font-mono text-[10px]">WARNING</Badge>;
+        return (
+          <Badge variant="outline" className="bg-amber-500/15 text-amber-400 border-amber-500/30 font-mono text-[10px] font-bold px-1.5 py-0.5">
+            WARNING
+          </Badge>
+        );
       default:
-        return <Badge variant="outline" className="font-mono text-[10px]">INFO</Badge>;
+        return (
+          <Badge variant="outline" className="bg-blue-500/15 text-blue-400 border-blue-500/30 font-mono text-[10px] font-bold px-1.5 py-0.5">
+            INFO
+          </Badge>
+        );
     }
   };
 
