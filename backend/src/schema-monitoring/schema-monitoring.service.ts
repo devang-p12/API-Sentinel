@@ -87,13 +87,38 @@ export class SchemaMonitoringService {
     const normalizedCurrent = this.normalizePayload(responseBody);
     const checksum = SchemaNormalizer.computeChecksum(normalizedCurrent);
 
-    // Find or create ApiSchema entry
+    // Build candidate endpoint variants to ensure 100% reliable matching across full URLs, relative paths, and trailing slashes
+    const endpointVariants = new Set<string>();
+    endpointVariants.add(endpoint);
+    endpointVariants.add(endpoint.trim());
+
+    try {
+      const dummyBase = 'http://sentinel.local';
+      const parsed = new URL(
+        endpoint.startsWith('http://') || endpoint.startsWith('https://')
+          ? endpoint
+          : `${dummyBase}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`,
+      );
+      const pn = parsed.pathname;
+      endpointVariants.add(pn);
+      endpointVariants.add(pn.replace(/\/+$/, '') || '/');
+      endpointVariants.add(pn.replace(/^\/+/, ''));
+      if (!pn.endsWith('/')) endpointVariants.add(`${pn}/`);
+      if (!pn.startsWith('/')) endpointVariants.add(`/${pn}`);
+    } catch {
+      // ignore url parse error
+    }
+
+    // Find ApiSchema entry (try with apiId first, then fallback across organization if needed)
     let schema = await this.prisma.apiSchema.findFirst({
       where: {
         organizationId,
-        apiId,
-        endpoint,
+        ...(apiId ? { apiId } : {}),
         method: method.toUpperCase(),
+        OR: [
+          { endpoint: { in: Array.from(endpointVariants) } },
+          ...(monitorConfigId ? [{ monitorConfigId }] : []),
+        ],
       },
       include: {
         versions: {
@@ -102,30 +127,23 @@ export class SchemaMonitoringService {
       },
     });
 
-    if (!schema) {
-      try {
-        const dummyBase = 'http://sentinel.local';
-        const parsedPath = new URL(
-          endpoint.startsWith('http') ? endpoint : `${dummyBase}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`,
-        ).pathname;
-        schema = await this.prisma.apiSchema.findFirst({
-          where: {
-            organizationId,
-            apiId,
-            method: method.toUpperCase(),
-            endpoint: {
-              in: [parsedPath, endpoint],
-            },
+    if (!schema && apiId) {
+      // Fallback: search without strict apiId restriction in case probe was triggered under environment or different api container
+      schema = await this.prisma.apiSchema.findFirst({
+        where: {
+          organizationId,
+          method: method.toUpperCase(),
+          OR: [
+            { endpoint: { in: Array.from(endpointVariants) } },
+            ...(monitorConfigId ? [{ monitorConfigId }] : []),
+          ],
+        },
+        include: {
+          versions: {
+            orderBy: { versionNumber: 'desc' },
           },
-          include: {
-            versions: {
-              orderBy: { versionNumber: 'desc' },
-            },
-          },
-        });
-      } catch {
-        // ignore url parse error
-      }
+        },
+      });
     }
 
     if (!schema) {
@@ -219,9 +237,23 @@ export class SchemaMonitoringService {
 
     let newVersionId: string | undefined;
 
-    // Case 3: If differences detected, store new SchemaVersion & SchemaChange records (Requirement 3 & 4)
+    // Case 3: If differences detected, store new SchemaVersion & SchemaChange records
     if (diffResult.hasChanges) {
-      const nextVersionNumber = (schema.versions[0]?.versionNumber || 1) + 1;
+      const latestVersion = schema.versions[0];
+      const isAlreadyRecorded = latestVersion && latestVersion.checksum === checksum;
+
+      if (isAlreadyRecorded) {
+        // This exact schema drift state was already recorded in latestVersion.
+        // Return diffResult without duplicating version numbers and change rows on every recurring probe ping!
+        return {
+          ...diffResult,
+          schemaId: schema.id,
+          versionId: latestVersion.id,
+          isNewBaseline: false,
+        };
+      }
+
+      const nextVersionNumber = (latestVersion?.versionNumber || 1) + 1;
 
       const newVersion = await this.prisma.schemaVersion.create({
         data: {
@@ -255,6 +287,16 @@ export class SchemaMonitoringService {
       this.logger.warn(
         `Detected ${diffResult.changes.length} contract change(s) for ${method} ${endpoint}: ${diffResult.summary}`,
       );
+    } else {
+      // Endpoint conforms to baseline!
+      // If there were unacknowledged changes from previous transient drift, resolve/acknowledge them
+      const latestVersion = schema.versions[0];
+      if (latestVersion && !latestVersion.isBaseline) {
+        await this.prisma.schemaChange.updateMany({
+          where: { schemaId: schema.id, isAcknowledged: false },
+          data: { isAcknowledged: true },
+        });
+      }
     }
 
     return {
@@ -779,5 +821,180 @@ export class SchemaMonitoringService {
     });
 
     return { success: true, change: updated };
+  }
+
+  /**
+   * Directly modifies the baseline schema definition of a schema contract.
+   */
+  async modifyBaseSchema(
+    schemaId: string,
+    organizationId: string,
+    dto: {
+      schemaJson?: any;
+      samplePayload?: any;
+    },
+    userId?: string,
+  ) {
+    const schema = await this.prisma.apiSchema.findFirst({
+      where: { id: schemaId, organizationId },
+      include: {
+        versions: {
+          orderBy: { versionNumber: 'desc' },
+        },
+      },
+    });
+
+    if (!schema) {
+      throw new NotFoundException(`Schema contract ${schemaId} not found.`);
+    }
+
+    let normalized: NormalizedSchemaNode;
+    let samplePayload: any = dto.samplePayload;
+
+    if (dto.schemaJson !== undefined && dto.schemaJson !== null) {
+      let rawJson = dto.schemaJson;
+      if (typeof rawJson === 'string') {
+        try {
+          rawJson = JSON.parse(rawJson);
+        } catch (err: any) {
+          throw new BadRequestException(`Invalid schema JSON: ${err.message}`);
+        }
+      }
+
+      // If rawJson is already a NormalizedSchemaNode:
+      if (rawJson && typeof rawJson === 'object' && rawJson.type && typeof rawJson.type === 'string') {
+        normalized = rawJson as NormalizedSchemaNode;
+      } else {
+        // It's a sample JSON payload
+        normalized = this.normalizePayload(rawJson);
+        if (!samplePayload) samplePayload = rawJson;
+      }
+    } else if (dto.samplePayload !== undefined && dto.samplePayload !== null) {
+      let rawPayload = dto.samplePayload;
+      if (typeof rawPayload === 'string') {
+        try {
+          rawPayload = JSON.parse(rawPayload);
+        } catch (err: any) {
+          throw new BadRequestException(`Invalid sample payload JSON: ${err.message}`);
+        }
+      }
+      samplePayload = rawPayload;
+      normalized = this.normalizePayload(rawPayload);
+    } else {
+      throw new BadRequestException('Either schemaJson or samplePayload must be provided.');
+    }
+
+    const checksum = SchemaNormalizer.computeChecksum(normalized);
+    const nextVersionNumber = (schema.versions[0]?.versionNumber || 0) + 1;
+
+    // Unset prior baseline flags
+    await this.prisma.schemaVersion.updateMany({
+      where: { schemaId: schema.id, isBaseline: true },
+      data: { isBaseline: false },
+    });
+
+    const newVersion = await this.prisma.schemaVersion.create({
+      data: {
+        schemaId: schema.id,
+        versionNumber: nextVersionNumber,
+        isBaseline: true,
+        normalizedSchema: normalized as any,
+        samplePayload: samplePayload ?? null,
+        checksum,
+        createdByUserId: userId || null,
+        approvedAt: new Date(),
+      },
+    });
+
+    await this.prisma.apiSchema.update({
+      where: { id: schema.id },
+      data: { activeBaselineVersionId: newVersion.id },
+    });
+
+    // Mark previous unacknowledged changes as acknowledged since the user established a new baseline
+    await this.prisma.schemaChange.updateMany({
+      where: { schemaId: schema.id, isAcknowledged: false },
+      data: { isAcknowledged: true },
+    });
+
+    this.logger.log(
+      `User modified base schema for ${schema.id}. Established v${nextVersionNumber} as new baseline.`,
+    );
+
+    return {
+      success: true,
+      schema,
+      version: newVersion,
+    };
+  }
+
+  /**
+   * Promotes the latest detected schema version as the active baseline contract.
+   */
+  async setCurrentAsBaseline(
+    schemaId: string,
+    organizationId: string,
+    userId?: string,
+  ) {
+    const schema = await this.prisma.apiSchema.findFirst({
+      where: { id: schemaId, organizationId },
+      include: {
+        versions: {
+          orderBy: { versionNumber: 'desc' },
+        },
+      },
+    });
+
+    if (!schema) {
+      throw new NotFoundException(`Schema contract ${schemaId} not found.`);
+    }
+
+    if (!schema.versions || schema.versions.length === 0) {
+      throw new BadRequestException('No schema versions recorded yet for this endpoint.');
+    }
+
+    const latestVersion = schema.versions[0];
+    if (latestVersion.isBaseline) {
+      return {
+        success: true,
+        schemaId: schema.id,
+        versionId: latestVersion.id,
+        versionNumber: latestVersion.versionNumber,
+        message: 'Current schema is already the active baseline.',
+      };
+    }
+
+    await this.approveNewBaseline(schema.id, latestVersion.id, organizationId, userId);
+
+    // Also acknowledge outstanding changes
+    await this.prisma.schemaChange.updateMany({
+      where: { schemaId: schema.id, isAcknowledged: false },
+      data: { isAcknowledged: true },
+    });
+
+    return {
+      success: true,
+      schemaId: schema.id,
+      versionId: latestVersion.id,
+      versionNumber: latestVersion.versionNumber,
+      message: `Version v${latestVersion.versionNumber} successfully set as new baseline contract.`,
+    };
+  }
+
+  /**
+   * Acknowledges all outstanding changes for a schema.
+   */
+  async acknowledgeAllForSchema(schemaId: string, organizationId: string) {
+    const schema = await this.prisma.apiSchema.findFirst({
+      where: { id: schemaId, organizationId },
+    });
+    if (!schema) {
+      throw new NotFoundException(`Schema contract ${schemaId} not found.`);
+    }
+    const result = await this.prisma.schemaChange.updateMany({
+      where: { schemaId, isAcknowledged: false },
+      data: { isAcknowledged: true },
+    });
+    return { success: true, count: result.count };
   }
 }

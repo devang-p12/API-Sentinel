@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import { SchemaMonitoringService } from './schema-monitoring.service';
@@ -157,5 +158,43 @@ export class SchemaMonitoringController {
     @Param('changeId') changeId: string,
   ) {
     return this.schemaService.acknowledgeChange(changeId, user.organizationId);
+  }
+
+  @Put('schemas/:id/baseline')
+  modifyBaseSchema(
+    @CurrentUser() user: any,
+    @Param('id') schemaId: string,
+    @Body()
+    dto: {
+      schemaJson?: any;
+      samplePayload?: any;
+    },
+  ) {
+    return this.schemaService.modifyBaseSchema(
+      schemaId,
+      user.organizationId,
+      dto,
+      user.userId,
+    );
+  }
+
+  @Post('schemas/:id/set-current-as-baseline')
+  setCurrentAsBaseline(
+    @CurrentUser() user: any,
+    @Param('id') schemaId: string,
+  ) {
+    return this.schemaService.setCurrentAsBaseline(
+      schemaId,
+      user.organizationId,
+      user.userId,
+    );
+  }
+
+  @Post('schemas/:id/acknowledge-all')
+  acknowledgeAllForSchema(
+    @CurrentUser() user: any,
+    @Param('id') schemaId: string,
+  ) {
+    return this.schemaService.acknowledgeAllForSchema(schemaId, user.organizationId);
   }
 }

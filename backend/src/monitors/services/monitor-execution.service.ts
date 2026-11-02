@@ -167,7 +167,7 @@ export class MonitorExecutionService {
     // Evaluate Schema Contract Conformance (Detect unexpected schema drift even when HTTP 200 OK)
     if (
       this.schemaMonitoringService &&
-      resolvedApiId &&
+      (resolvedApiId || resolvedOrgId) &&
       probeResult.statusCode &&
       probeResult.statusCode >= 200 &&
       probeResult.statusCode < 300 &&
@@ -176,8 +176,9 @@ export class MonitorExecutionService {
       try {
         const schemaComparison = await this.schemaMonitoringService.processResponse({
           organizationId: resolvedOrgId,
-          apiId: resolvedApiId,
+          apiId: resolvedApiId || '',
           environmentId: resolvedEnvId,
+          monitorConfigId: isConfigModel ? monitor.id : undefined,
           endpoint: targetUrl || monitor.url,
           method: monitor.method || 'GET',
           statusCode: probeResult.statusCode,

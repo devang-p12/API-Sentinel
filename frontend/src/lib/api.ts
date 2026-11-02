@@ -1490,6 +1490,32 @@ export const api = {
       `/schemas/changes/${changeId}/acknowledge`,
       { method: 'POST' },
     ),
+  acknowledgeAllSchemaChanges: (schemaId: string) =>
+    fetchJson<{ success: boolean; count: number }>(
+      `/schemas/${schemaId}/acknowledge-all`,
+      { method: 'POST' },
+    ),
+  modifyBaseSchema: (
+    schemaId: string,
+    data: { schemaJson?: any; samplePayload?: any },
+  ) =>
+    fetchJson<{ success: boolean; schema: ApiSchemaSummary; version: any }>(
+      `/schemas/${schemaId}/baseline`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    ),
+  setCurrentAsBaseline: (schemaId: string) =>
+    fetchJson<{
+      success: boolean;
+      schemaId: string;
+      versionId: string;
+      versionNumber: number;
+      message: string;
+    }>(`/schemas/${schemaId}/set-current-as-baseline`, {
+      method: 'POST',
+    }),
 };
 
 export interface ApiSchemaSummary {
