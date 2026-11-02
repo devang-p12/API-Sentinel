@@ -46,6 +46,8 @@ export function ApiTesterPage() {
   const [selectedApiId, setSelectedApiId] = useState<string>('');
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<string>('');
+  const [apiEndpoints, setApiEndpoints] = useState<Array<{ id: string; name: string; url: string; method: HttpMethod }>>([]);
+  const [selectedEndpointId, setSelectedEndpointId] = useState<string>('');
 
   // Collections and History State
   const [collections, setCollections] = useState<ApiCollection[]>([]);
@@ -162,16 +164,94 @@ export function ApiTesterPage() {
     loadCollectionsAndHistory(projId);
   };
 
-  // When API changes, update available environments
-  const handleSelectApi = (apiId: string) => {
+  // When API changes, load API configuration, environments, and endpoints
+  const handleSelectApi = async (apiId: string) => {
     setSelectedApiId(apiId);
-    const currentApi = apis.find((a) => a.id === apiId);
-    if (currentApi && currentApi.environments && currentApi.environments.length > 0) {
-      setEnvironments(currentApi.environments);
-      setSelectedEnvironmentId(currentApi.environments[0].id);
-    } else {
+    setSelectedEndpointId('');
+
+    if (!apiId) {
+      setApiEndpoints([]);
       setEnvironments([]);
       setSelectedEnvironmentId('');
+      return;
+    }
+
+    try {
+      const fullApi = await api.getApi(apiId);
+      const envs = fullApi.environments || [];
+      setEnvironments(envs);
+
+      // Collect all endpoints/monitors configured for this API
+      const endpoints: Array<{ id: string; name: string; url: string; method: HttpMethod }> = [];
+      const seenUrls = new Set<string>();
+      for (const env of envs) {
+        for (const mon of (env as any).monitors || []) {
+          const key = `${mon.method || 'GET'}:${mon.url}`;
+          if (!seenUrls.has(key)) {
+            seenUrls.add(key);
+            endpoints.push({
+              id: mon.id,
+              name: mon.name || mon.url,
+              url: mon.url,
+              method: (mon.method || 'GET') as HttpMethod,
+            });
+          }
+        }
+      }
+      setApiEndpoints(endpoints);
+
+      // Select primary environment and populate URL
+      const primaryEnv = envs[0];
+      if (primaryEnv) {
+        setSelectedEnvironmentId(primaryEnv.id);
+        const baseUrl = (primaryEnv.baseUrl || '').replace(/\/+$/, '');
+        if (endpoints.length > 0) {
+          const firstEp = endpoints[0];
+          setSelectedEndpointId(firstEp.id);
+          setMethod(firstEp.method);
+          const epPath = firstEp.url.startsWith('/') ? firstEp.url : `/${firstEp.url}`;
+          setUrl(baseUrl ? `${baseUrl}${epPath}` : firstEp.url);
+          setRequestName(`${fullApi.name} - ${firstEp.name}`);
+        } else if (baseUrl) {
+          setUrl(`${baseUrl}/`);
+          setRequestName(`${fullApi.name} Request`);
+        } else {
+          setRequestName(`${fullApi.name} Request`);
+        }
+      } else {
+        setSelectedEnvironmentId('');
+        setRequestName(`${fullApi.name} Request`);
+      }
+    } catch (err) {
+      console.error('Failed to load API details in tester:', err);
+    }
+  };
+
+  const handleSelectEndpoint = (endpointId: string) => {
+    setSelectedEndpointId(endpointId);
+    const ep = apiEndpoints.find((e) => e.id === endpointId);
+    if (!ep) return;
+    setMethod(ep.method);
+    const selectedEnv = environments.find((e) => e.id === selectedEnvironmentId);
+    const baseUrl = (selectedEnv?.baseUrl || '').replace(/\/+$/, '');
+    const epPath = ep.url.startsWith('/') ? ep.url : `/${ep.url}`;
+    setUrl(baseUrl ? `${baseUrl}${epPath}` : ep.url);
+    const currentApi = apis.find((a) => a.id === selectedApiId);
+    setRequestName(`${currentApi?.name || 'API'} - ${ep.name}`);
+  };
+
+  const handleSelectEnvironment = (newEnvId: string) => {
+    const oldEnv = environments.find((e) => e.id === selectedEnvironmentId);
+    const newEnv = environments.find((e) => e.id === newEnvId);
+    setSelectedEnvironmentId(newEnvId);
+
+    const oldBase = (oldEnv?.baseUrl || '').replace(/\/+$/, '');
+    const newBase = (newEnv?.baseUrl || '').replace(/\/+$/, '');
+
+    if (newBase && oldBase && url.startsWith(oldBase)) {
+      setUrl(url.replace(oldBase, newBase));
+    } else if (newBase && (url === 'https://httpbin.org/get' || !url)) {
+      setUrl(`${newBase}/`);
     }
   };
 
@@ -417,6 +497,21 @@ export function ApiTesterPage() {
         value: String(v),
       }));
       setHeaders(newHeaders.length > 0 ? newHeaders : [{ id: '1', enabled: true, key: '', value: '' }]);
+    } else {
+      setHeaders([{ id: '1', enabled: true, key: '', value: '' }]);
+    }
+
+    // Query Params
+    if (req.queryParams && typeof req.queryParams === 'object') {
+      const newParams: ParamRow[] = Object.entries(req.queryParams).map(([k, v], i) => ({
+        id: `param-saved-${i}`,
+        enabled: true,
+        key: k,
+        value: String(v),
+      }));
+      setParams(newParams.length > 0 ? newParams : [{ id: '1', enabled: true, key: '', value: '' }]);
+    } else {
+      setParams([{ id: '1', enabled: true, key: '', value: '' }]);
     }
 
     // Body
@@ -437,6 +532,18 @@ export function ApiTesterPage() {
     // Tests
     if (req.tests && Array.isArray(req.tests)) {
       setTests(req.tests);
+    }
+
+    // Restore API and Environment selection
+    if (req.apiId) {
+      setSelectedApiId(req.apiId);
+      const matchedApi = apis.find((a) => a.id === req.apiId);
+      if (matchedApi && matchedApi.environments) {
+        setEnvironments(matchedApi.environments);
+      }
+    }
+    if (req.environmentId) {
+      setSelectedEnvironmentId(req.environmentId);
     }
   };
 
@@ -594,9 +701,19 @@ export function ApiTesterPage() {
           apis={apis}
           selectedApiId={selectedApiId}
           onSelectApi={handleSelectApi}
+          endpoints={apiEndpoints}
+          selectedEndpointId={selectedEndpointId}
+          onSelectEndpoint={handleSelectEndpoint}
           environments={environments}
           selectedEnvironmentId={selectedEnvironmentId}
-          onSelectEnvironment={setSelectedEnvironmentId}
+          onSelectEnvironment={handleSelectEnvironment}
+          savedRequests={(collections || []).flatMap((c) => c.requests || [])}
+          selectedSavedRequestId={activeSavedRequest?.id}
+          onSelectSavedRequest={(reqId) => {
+            const allReqs = (collections || []).flatMap((c) => c.requests || []);
+            const found = allReqs.find((r) => r.id === reqId);
+            if (found) handleSelectSavedRequest(found);
+          }}
           activeVariables={activeVariables.current}
           onOpenImportCurl={() => setIsCurlModalOpen(true)}
           onOpenSaveRequest={() => setIsSaveDialogOpen(true)}

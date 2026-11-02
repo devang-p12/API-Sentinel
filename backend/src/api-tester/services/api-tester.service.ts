@@ -139,7 +139,7 @@ export class ApiTesterService {
    * Collections Operations
    */
   async getCollections(organizationId?: string, projectId?: string) {
-    return this.prisma.apiCollection.findMany({
+    const collections = await this.prisma.apiCollection.findMany({
       where: {
         ...(organizationId ? { organizationId } : {}),
         ...(projectId ? { projectId } : {}),
@@ -155,6 +155,35 @@ export class ApiTesterService {
       },
       orderBy: { name: 'asc' },
     });
+
+    // Also include saved requests that do not belong to an explicit collection
+    const uncollectedRequests = await this.prisma.savedApiRequest.findMany({
+      where: {
+        ...(organizationId ? { organizationId } : {}),
+        ...(projectId ? { projectId } : {}),
+        collectionId: null,
+      },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        api: { select: { id: true, name: true } },
+        environment: { select: { id: true, name: true, baseUrl: true } },
+      },
+    });
+
+    if (uncollectedRequests.length > 0) {
+      collections.unshift({
+        id: 'uncollected',
+        name: 'Saved Requests',
+        description: 'Requests saved without a collection',
+        projectId: projectId || '',
+        organizationId: organizationId || '',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        requests: uncollectedRequests as any,
+      });
+    }
+
+    return collections;
   }
 
   async createCollection(dto: CreateCollectionDto, organizationId?: string) {

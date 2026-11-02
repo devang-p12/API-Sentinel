@@ -21,9 +21,17 @@ interface EnvironmentVariablesBarProps {
   selectedApiId: string;
   onSelectApi: (apiId: string) => void;
 
+  endpoints?: Array<{ id: string; name: string; url: string; method: string }>;
+  selectedEndpointId?: string;
+  onSelectEndpoint?: (endpointId: string) => void;
+
   environments: Environment[];
   selectedEnvironmentId: string;
   onSelectEnvironment: (envId: string) => void;
+
+  savedRequests?: Array<{ id: string; name: string; method: string }>;
+  selectedSavedRequestId?: string;
+  onSelectSavedRequest?: (id: string) => void;
 
   activeVariables: Record<string, string>;
 
@@ -40,9 +48,15 @@ export function EnvironmentVariablesBar({
   apis,
   selectedApiId,
   onSelectApi,
+  endpoints,
+  selectedEndpointId,
+  onSelectEndpoint,
   environments,
   selectedEnvironmentId,
   onSelectEnvironment,
+  savedRequests,
+  selectedSavedRequestId,
+  onSelectSavedRequest,
   activeVariables,
   onOpenImportCurl,
   onOpenSaveRequest,
@@ -53,7 +67,7 @@ export function EnvironmentVariablesBar({
 
   return (
     <div className="border-b border-border bg-card/60 backdrop-blur-xs px-3 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-3 text-xs">
-      {/* Left side: Context Selectors (Project, API, Environment) */}
+      {/* Left side: Context Selectors (Project, API, Endpoint, Environment, Saved Requests) */}
       <div className="flex flex-wrap items-center gap-2">
         {/* Project Selector */}
         <div className="flex items-center gap-1.5 bg-background border border-border px-2 py-1 rounded-none">
@@ -92,6 +106,27 @@ export function EnvironmentVariablesBar({
           </select>
         </div>
 
+        {/* Endpoint Selector (Shown when API has endpoints) */}
+        {endpoints && endpoints.length > 0 && (
+          <div className="flex items-center gap-1.5 bg-background border border-border px-2 py-1 rounded-none">
+            <span className="text-[10px] text-muted-foreground font-mono uppercase">Endpoint:</span>
+            <select
+              value={selectedEndpointId || ''}
+              onChange={(e) => onSelectEndpoint && onSelectEndpoint(e.target.value)}
+              className="bg-transparent font-medium text-foreground text-xs focus:outline-none cursor-pointer max-w-[150px] truncate"
+            >
+              <option value="" className="bg-background text-muted-foreground">
+                (Pick Endpoint)
+              </option>
+              {endpoints.map((ep) => (
+                <option key={ep.id} value={ep.id} className="bg-background text-foreground">
+                  {ep.method} {ep.url}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Environment Selector */}
         <div className="flex items-center gap-1.5 bg-background border border-border px-2 py-1 rounded-none">
           <HugeiconsIcon icon={GlobalIcon} className="size-3.5 text-muted-foreground shrink-0" />
@@ -112,9 +147,31 @@ export function EnvironmentVariablesBar({
           </select>
         </div>
 
+        {/* Saved Requests Quick-Picker */}
+        {savedRequests && savedRequests.length > 0 && (
+          <div className="flex items-center gap-1.5 bg-background border border-border px-2 py-1 rounded-none">
+            <HugeiconsIcon icon={Bookmark01Icon} className="size-3.5 text-amber-500 shrink-0" />
+            <span className="text-[10px] text-muted-foreground font-mono uppercase">Saved:</span>
+            <select
+              value={selectedSavedRequestId || ''}
+              onChange={(e) => onSelectSavedRequest && onSelectSavedRequest(e.target.value)}
+              className="bg-transparent font-medium text-foreground text-xs focus:outline-none cursor-pointer max-w-[160px] truncate"
+            >
+              <option value="" className="bg-background text-muted-foreground">
+                (Load Saved Request)
+              </option>
+              {savedRequests.map((req) => (
+                <option key={req.id} value={req.id} className="bg-background text-foreground">
+                  {req.name} ({req.method})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Active Variables Pills */}
         {varKeys.length > 0 && (
-          <div className="hidden lg:flex items-center gap-1.5 pl-1">
+          <div className="hidden xl:flex items-center gap-1.5 pl-1">
             <span className="text-[10px] text-muted-foreground font-mono">Variables:</span>
             {varKeys.slice(0, 3).map((k) => (
               <Badge
@@ -152,11 +209,11 @@ export function EnvironmentVariablesBar({
           variant="outline"
           size="xs"
           onClick={onOpenSaveRequest}
-          className="rounded-none gap-1 h-7 text-[11px]"
+          className="rounded-none gap-1 h-7 text-[11px] font-medium"
           title="Save request to collection (Ctrl+S)"
         >
-          <HugeiconsIcon icon={Bookmark01Icon} className="size-3.5 text-muted-foreground" />
-          <span className="hidden sm:inline">Save</span>
+          <HugeiconsIcon icon={Bookmark01Icon} className="size-3.5 text-primary" />
+          <span>Save</span>
         </Button>
 
         <div className="h-4 w-px bg-border mx-0.5" />
