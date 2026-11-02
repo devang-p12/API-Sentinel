@@ -3,6 +3,7 @@ import {
   ConflictException,
   UnauthorizedException,
   NotFoundException,
+  InternalServerErrorException,
   Logger,
   OnModuleInit,
 } from '@nestjs/common';
@@ -94,170 +95,186 @@ export class AuthService implements OnModuleInit {
   }
 
   async register(dto: RegisterDto): Promise<AuthResponse> {
-    const email = dto.email.toLowerCase().trim();
-    const existing = await this.prisma.user.findUnique({
-      where: { email },
-    });
+    try {
+      const email = dto.email.toLowerCase().trim();
+      const existing = await this.prisma.user.findUnique({
+        where: { email },
+      });
 
-    if (existing) {
-      throw new ConflictException('An account with this email address already exists');
-    }
+      if (existing) {
+        throw new ConflictException('An account with this email address already exists');
+      }
 
-    const orgName = dto.organizationName?.trim() || `${dto.firstName}'s Team`;
-    let baseSlug = orgName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
-    if (!baseSlug) baseSlug = 'workspace';
+      const orgName = dto.organizationName?.trim() || `${dto.firstName}'s Team`;
+      let baseSlug = orgName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+      if (!baseSlug) baseSlug = 'workspace';
 
-    let slug = baseSlug;
-    let counter = 1;
-    while (await this.prisma.organization.findUnique({ where: { slug } })) {
-      slug = `${baseSlug}-${counter++}`;
-    }
+      let slug = baseSlug;
+      let counter = 1;
+      while (await this.prisma.organization.findUnique({ where: { slug } })) {
+        slug = `${baseSlug}-${counter++}`;
+      }
 
-    const passwordHash = await bcrypt.hash(dto.password, 10);
+      const passwordHash = await bcrypt.hash(dto.password, 10);
 
-    const organization = await this.prisma.organization.create({
-      data: {
-        name: orgName,
-        slug,
-      },
-    });
-
-    const user = await this.prisma.user.create({
-      data: {
-        email,
-        passwordHash,
-        firstName: dto.firstName.trim(),
-        lastName: dto.lastName.trim(),
-        role: UserRole.OWNER,
-        organizationId: organization.id,
-        memberships: {
-          create: {
-            organizationId: organization.id,
-            role: UserRole.OWNER,
-          },
+      const organization = await this.prisma.organization.create({
+        data: {
+          name: orgName,
+          slug,
         },
-      },
-      include: {
-        memberships: {
-          include: {
-            organization: true,
-          },
-        },
-        organization: true,
-      },
-    });
+      });
 
-    const activeMembership = user.memberships[0];
-
-    const token = this.generateToken({
-      sub: user.id,
-      email: user.email,
-      organizationId: organization.id,
-      role: activeMembership.role,
-    });
-
-    return {
-      accessToken: token,
-      user: {
-        id: user.id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: activeMembership.role,
-        organizationId: organization.id,
-        organization: {
-          id: organization.id,
-          name: organization.name,
-          slug: organization.slug,
-        },
-        memberships: user.memberships.map((m) => ({
-          id: m.id,
-          organizationId: m.organizationId,
-          organizationName: m.organization.name,
-          organizationSlug: m.organization.slug,
-          role: m.role,
-        })),
-      },
-    };
-  }
-
-  async login(dto: LoginDto): Promise<AuthResponse> {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email.toLowerCase().trim() },
-      include: {
-        memberships: {
-          include: {
-            organization: {
-              select: { id: true, name: true, slug: true },
+      const user = await this.prisma.user.create({
+        data: {
+          email,
+          passwordHash,
+          firstName: dto.firstName.trim(),
+          lastName: dto.lastName.trim(),
+          role: UserRole.OWNER,
+          organizationId: organization.id,
+          memberships: {
+            create: {
+              organizationId: organization.id,
+              role: UserRole.OWNER,
             },
           },
         },
-        organization: {
-          select: { id: true, name: true, slug: true },
-        },
-      },
-    });
-
-    if (!user) {
-      throw new UnauthorizedException('Invalid email or password');
-    }
-
-    const isMatch = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!isMatch) {
-      throw new UnauthorizedException('Invalid email or password');
-    }
-
-    // Auto-heal membership if missing
-    let memberships = user.memberships;
-    if (!memberships || memberships.length === 0) {
-      const created = await this.prisma.membership.create({
-        data: {
-          userId: user.id,
-          organizationId: user.organizationId,
-          role: user.role,
-        },
         include: {
+          memberships: {
+            include: {
+              organization: true,
+            },
+          },
+          organization: true,
+        },
+      });
+
+      const activeMembership = user.memberships[0];
+
+      const token = this.generateToken({
+        sub: user.id,
+        email: user.email,
+        organizationId: organization.id,
+        role: activeMembership.role,
+      });
+
+      return {
+        accessToken: token,
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          role: activeMembership.role,
+          organizationId: organization.id,
+          organization: {
+            id: organization.id,
+            name: organization.name,
+            slug: organization.slug,
+          },
+          memberships: user.memberships.map((m) => ({
+            id: m.id,
+            organizationId: m.organizationId,
+            organizationName: m.organization.name,
+            organizationSlug: m.organization.slug,
+            role: m.role,
+          })),
+        },
+      };
+    } catch (err: any) {
+      if (err instanceof ConflictException) {
+        throw err;
+      }
+      this.logger.error(`Registration failed for ${dto.email}: ${err.message}`, err.stack);
+      throw new InternalServerErrorException(err.message || 'Registration failed');
+    }
+  }
+
+  async login(dto: LoginDto): Promise<AuthResponse> {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { email: dto.email.toLowerCase().trim() },
+        include: {
+          memberships: {
+            include: {
+              organization: {
+                select: { id: true, name: true, slug: true },
+              },
+            },
+          },
           organization: {
             select: { id: true, name: true, slug: true },
           },
         },
       });
-      memberships = [created];
-    }
 
-    const activeMembership =
-      memberships.find((m) => m.organizationId === user.organizationId) ||
-      memberships[0];
+      if (!user) {
+        throw new UnauthorizedException('Invalid email or password');
+      }
 
-    const token = this.generateToken({
-      sub: user.id,
-      email: user.email,
-      organizationId: activeMembership.organizationId,
-      role: activeMembership.role,
-    });
+      const isMatch = await bcrypt.compare(dto.password, user.passwordHash);
+      if (!isMatch) {
+        throw new UnauthorizedException('Invalid email or password');
+      }
 
-    return {
-      accessToken: token,
-      user: {
-        id: user.id,
+      // Auto-heal membership if missing
+      let memberships = user.memberships;
+      if (!memberships || memberships.length === 0) {
+        const created = await this.prisma.membership.create({
+          data: {
+            userId: user.id,
+            organizationId: user.organizationId,
+            role: user.role,
+          },
+          include: {
+            organization: {
+              select: { id: true, name: true, slug: true },
+            },
+          },
+        });
+        memberships = [created];
+      }
+
+      const activeMembership =
+        memberships.find((m) => m.organizationId === user.organizationId) ||
+        memberships[0];
+
+      const token = this.generateToken({
+        sub: user.id,
         email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: activeMembership.role,
         organizationId: activeMembership.organizationId,
-        organization: activeMembership.organization,
-        memberships: memberships.map((m) => ({
-          id: m.id,
-          organizationId: m.organizationId,
-          organizationName: m.organization.name,
-          organizationSlug: m.organization.slug,
-          role: m.role,
-        })),
-      },
-    };
+        role: activeMembership.role,
+      });
+
+      return {
+        accessToken: token,
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          role: activeMembership.role,
+          organizationId: activeMembership.organizationId,
+          organization: activeMembership.organization,
+          memberships: memberships.map((m) => ({
+            id: m.id,
+            organizationId: m.organizationId,
+            organizationName: m.organization.name,
+            organizationSlug: m.organization.slug,
+            role: m.role,
+          })),
+        },
+      };
+    } catch (err: any) {
+      if (err instanceof UnauthorizedException) {
+        throw err;
+      }
+      this.logger.error(`Login error for ${dto.email}: ${err.message}`, err.stack);
+      throw new InternalServerErrorException(err.message || 'Login failed');
+    }
   }
 
   async getProfile(userId: string) {

@@ -56,5 +56,6 @@ COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 
-# Start NestJS directly (instant boot, binds immediately to 0.0.0.0:3000)
-CMD ["node", "dist/main"]
+# Start NestJS with schema auto-push to ensure all SaaS tables exist in remote PostgreSQL
+CMD ["sh", "-c", "npx prisma db push --skip-generate --accept-data-loss && node dist/main"]
+
