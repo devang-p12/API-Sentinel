@@ -723,45 +723,55 @@ export function ContractsPage() {
                         </div>
 
                         {/* Live Verification Banner with 1-click 'Set Current as Base' */}
-                        {verificationBanner && verificationBanner.schemaId === schema.id && (
-                          <div
-                            className={`p-2.5 text-xs font-mono border rounded flex items-center justify-between gap-3 flex-wrap ${
-                              verificationBanner.hasBreakingChanges
-                                ? 'bg-rose-500/10 border-rose-500/30 text-rose-500'
-                                : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
-                            }`}
-                          >
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span>
-                                {verificationBanner.hasBreakingChanges
-                                  ? '● BREAKING CONTRACT DRIFT (200 OK)'
-                                  : '✓ CONTRACT CONFORMS'}
-                              </span>
-                              {verificationBanner.statusCode && (
-                                <span>(HTTP {verificationBanner.statusCode} OK)</span>
-                              )}
-                              <span>— {verificationBanner.summary}</span>
-                            </div>
+                        {verificationBanner && verificationBanner.schemaId === schema.id && (() => {
+                          const isNonSuccess =
+                            Boolean(verificationBanner.statusCode) &&
+                            (verificationBanner.statusCode! < 200 || verificationBanner.statusCode! >= 300);
 
-                            <div className="flex items-center gap-2">
-                              {verificationBanner.durationMs !== undefined && (
-                                <span className="text-[10px] opacity-75 shrink-0">
-                                  {verificationBanner.durationMs}ms
+                          return (
+                            <div
+                              className={`p-2.5 text-xs font-mono border rounded flex items-center justify-between gap-3 flex-wrap ${
+                                isNonSuccess
+                                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-500'
+                                  : verificationBanner.hasBreakingChanges
+                                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-500'
+                                  : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span>
+                                  {isNonSuccess
+                                    ? `○ EVALUATION SKIPPED`
+                                    : verificationBanner.hasBreakingChanges
+                                    ? `● BREAKING CONTRACT DRIFT`
+                                    : `✓ CONTRACT CONFORMS`}
                                 </span>
-                              )}
-                              {verificationBanner.hasBreakingChanges && (
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleSetCurrentAsBaseline(schema.id)}
-                                  disabled={promotingSchemaId === schema.id}
-                                  className="h-6 text-[10px] font-mono font-bold bg-rose-600 hover:bg-rose-700 text-white"
-                                >
-                                  {promotingSchemaId === schema.id ? 'Setting...' : 'Set Current as Base'}
-                                </Button>
-                              )}
+                                {verificationBanner.statusCode && (
+                                  <span>(HTTP {verificationBanner.statusCode})</span>
+                                )}
+                                <span>— {verificationBanner.summary}</span>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                {verificationBanner.durationMs !== undefined && (
+                                  <span className="text-[10px] opacity-75 shrink-0">
+                                    {verificationBanner.durationMs}ms
+                                  </span>
+                                )}
+                                {!isNonSuccess && verificationBanner.hasBreakingChanges && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleSetCurrentAsBaseline(schema.id)}
+                                    disabled={promotingSchemaId === schema.id}
+                                    className="h-6 text-[10px] font-mono font-bold bg-rose-600 hover:bg-rose-700 text-white"
+                                  >
+                                    {promotingSchemaId === schema.id ? 'Setting...' : 'Set Current as Base'}
+                                  </Button>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
                       </div>
 
                       {/* Action Buttons */}
